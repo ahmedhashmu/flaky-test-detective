@@ -3,7 +3,7 @@
 Tasks are ordered so that each one is verifiable when it lands. The analysis
 modules come before the CLI so they can be tested as pure functions.
 
-- [ ] 1. Project scaffolding
+- [x] 1. Project scaffolding
   - `pyproject.toml` with `uv` support, `typer` + `rich` runtime deps, `pytest` +
     `ruff` + `mypy` dev deps, `flaky` console script
   - Package skeleton under `src/flaky_detective/`
@@ -11,26 +11,26 @@ modules come before the CLI so they can be tested as pure functions.
     to fight generated code
   - _Requirements: NFR3, NFR4_
 
-- [ ] 2. Core data models
+- [x] 2. Core data models
   - `TestOutcome`, `TestRun`, `Status` enum, `FlakeVerdict`, `TestAnalysis`
   - Frozen dataclasses; `slots=True` since these are allocated per result row
   - `test_id` construction and normalization
   - _Requirements: FR1.1, FR2.5_
 
-- [ ] 3. Message normalization and signatures
+- [x] 3. Message normalization and signatures
   - Ordered substitution pipeline per design table
   - `normalize_message`, `signature_of`
   - Unit tests covering each substitution and their interaction order
   - _Requirements: FR3.1_
 
-- [ ] 4. SQLite storage layer
+- [x] 4. SQLite storage layer
   - Schema, WAL, indexes, `meta` version row
   - `Storage` context manager; `add_run` returning existing id on duplicate
     `run_uid` for idempotency
   - Query helpers: results by window, by test, distinct commits, stats
   - _Requirements: FR1.4, NFR1, NFR2_
 
-- [ ] 5. JUnit XML parser
+- [x] 5. JUnit XML parser
   - Recursive `testsuite` walk, since Maven nests and pytest does not
   - Dialect handling for pytest, jest, go-junit-report, surefire, trx2junit
   - Runner auto-detection from structural fingerprints
@@ -39,45 +39,45 @@ modules come before the CLI so they can be tested as pure functions.
   - Tests using real fixture XML from each dialect
   - _Requirements: FR1.1, FR1.2, FR1.5_
 
-- [ ] 6. Environment and git metadata detection
+- [x] 6. Environment and git metadata detection
   - Commit SHA and branch from `git rev-parse`, with graceful failure outside a
     repo
   - CI detection: GitHub Actions, GitLab, CircleCI, Jenkins, Buildkite
   - Explicit flags override everything detected
   - _Requirements: FR1.3_
 
-- [ ] 7. Flakiness engine
+- [x] 7. Flakiness engine
   - Same-commit divergence, flip rate, confidence-weighted score
   - Verdict assignment: flaky / regression / broken / fixed / stable
   - Weight renormalization when no commit data exists
   - Tests: known-flaky, known-regression, never-passed, recovered sequences
   - _Requirements: FR2.1–FR2.5_
 
-- [ ] 8. Failure clustering
+- [x] 8. Failure clustering
   - Group by signature, rank by test count then failure count
   - Representative message per cluster
   - _Requirements: FR3.2_
 
-- [ ] 9. Root-cause classifier
+- [x] 9. Root-cause classifier
   - Rule table with weights; return category plus matched evidence
   - Remediation hint per category
   - Tests asserting each category fires on a realistic message
   - _Requirements: FR3.3_
 
-- [ ] 10. Order-dependence detector
+- [x] 10. Order-dependence detector
   - Position separation statistic with minimum-sample guard
   - Predecessor correlation to name the likely polluting test
   - Tests with synthetic position data, including a negative case
   - _Requirements: FR3.4_
 
-- [ ] 11. Re-run driver
+- [x] 11. Re-run driver
   - `subprocess` execution, temp XML per iteration, ingest through the shared
     parser path
   - Per-runner randomization injection; explicit warning when unavailable
   - Progress streaming, early stop on N distinct flakes
   - _Requirements: FR4.1–FR4.4_
 
-- [ ] 12. Reporters
+- [x] 12. Reporters
   - Console via `rich` tables
   - Markdown sized for a PR comment
   - JSON with a documented shape
@@ -85,24 +85,24 @@ modules come before the CLI so they can be tested as pure functions.
   - Triage view: known flake vs new failure for one report
   - _Requirements: FR5.1–FR5.5_
 
-- [ ] 13. Quarantine management
+- [x] 13. Quarantine management
   - JSON-backed list with reason, score, expiry, added-at
   - Exporters: pytest deselect, pytest markers, jest ignore patterns, generic
   - `verify` re-checking expired entries against current history
   - _Requirements: FR6.1–FR6.4_
 
-- [ ] 14. Configuration
+- [x] 14. Configuration
   - `.flaky.toml` discovery walking up from cwd
   - Thresholds, paths, ignore patterns; flags take precedence
   - _Requirements: FR7.2_
 
-- [ ] 15. CLI
+- [x] 15. CLI
   - All commands from the design surface
   - Exit codes 0/1/2/3 per FR7.1
   - `--help` text that stands alone without the README
   - _Requirements: FR7.1, FR7.3_
 
-- [ ] 16. Demo suite with real flakes
+- [x] 16. Demo suite with real flakes
   - `examples/flaky_demo/`: tests that are genuinely intermittent, not simulated
     — a time-boundary race, a shared-state order dependence, a resource
     contention flake, a seeded-randomness flake, plus stable tests as controls
@@ -110,26 +110,77 @@ modules come before the CLI so they can be tested as pure functions.
   - Deterministic escape hatch via env var so CI of *this* repo stays green
   - _Requirements: acceptance criteria 1–3_
 
-- [ ] 17. Integration tests
+- [x] 17. Integration tests
   - Full pipeline: hunt the demo suite, analyze, assert the planted flakes rank
     above the controls
   - Idempotency: double ingest leaves analysis unchanged
   - CLI smoke tests for every command via `typer.testing.CliRunner`
   - _Requirements: acceptance criteria 4–5_
 
-- [ ] 18. CI workflow and Kiro hooks
+- [x] 18. CI workflow and Kiro hooks
   - GitHub Actions: lint, type check, test on 3.11–3.13
   - A second job dogfooding the tool on this repo's own suite
   - `.kiro/hooks` for test-on-save and post-task verification
   - _Requirements: FR7.1_
 
-- [ ] 19. Documentation
+- [x] 19. Documentation
   - README: problem, install, every command with real output, CI recipes, how
     Kiro was used, testing instructions with no credentials
   - Document exit codes and the JSON shape
   - _Requirements: submission requirements_
 
-- [ ] 20. End-to-end verification
+- [x] 20. End-to-end verification
   - Clean clone, `uv sync`, run every documented command, confirm output matches
     the README
   - _Requirements: all_
+
+---
+
+## Outcome
+
+All 20 tasks landed. Final state:
+
+- 426 tests, 89% coverage, running in about 5 seconds
+- `ruff check`, `ruff format --check` and `mypy` all clean
+- Verified from a clean clone: 39 checks covering every command documented in the
+  README, all passing
+
+### What the plan got wrong
+
+Worth recording, because the corrections are the most useful part of the audit
+trail.
+
+**Task 10, order-dependence detection, was specified wrongly and had to be
+rewritten twice.** The requirement (FR3.4) asked for correlation between outcome
+and position in the run. That is a reasonable-sounding proxy and it does not work:
+measured over 40 shuffled iterations of the demo suite, the two strongest position
+signals were both *timing* flakes, while the two genuinely order-dependent tests
+ranked below them. Position tracks how late a test runs, which tracks machine
+warm-up. Detection now requires naming a polluting predecessor that beats the
+test's own base failure rate. Full measurements are in `design.md`.
+
+**Task 7, regression versus flaky, needed a second condition.** Three trailing
+failures was not sufficient: a genuinely flaky test that happened to fail its last
+three iterations was reported as a regression, which would send someone hunting a
+bad commit that does not exist.
+
+**Task 3's scoring had a ceiling bug** found by a test rather than by inspection.
+With no commit SHAs available, flip-rate-only scoring could reach 1.00 — identical
+to a score backed by same-commit proof. Capped at 0.85, so the number still carries
+information about how much the verdict can be trusted.
+
+**Task 17's integration tests had to be weakened deliberately.** The first version
+asserted that specific demo tests were flaky. Since the demo suite is genuinely
+random, that made the assertions themselves flaky. They now assert only invariants
+that hold in every sample, and the probabilistic behaviour is covered
+deterministically elsewhere.
+
+**An unplanned task appeared: `tests/test_architecture.py`.** The dependency rules
+in `.kiro/steering/structure.md` were prose, and prose decays on the first hurried
+change. They are now 60 enforced assertions.
+
+**A flaky test was found in this project's own suite** while verifying the README.
+Several CLI assertions searched for a phrase in rich-formatted output, and rich
+wraps to the attached terminal, so `"DOCTYPE or ENTITY"` passed in a wide shell and
+failed in a narrow one. Fixed by honouring `COLUMNS` in the CLI and pinning the
+width in tests. Verified at four widths and with the variable unset.
