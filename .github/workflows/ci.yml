@@ -1,0 +1,126 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Keep uv's downloads and the venv out of the way of the tool's own .flaky.db.
+  UV_CACHE_DIR: /tmp/.uv-cache
+
+jobs:
+  checks:
+    name: Lint and types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install
+        run: uv sync --python 3.12
+
+      - name: Ruff lint
+        run: uv run ruff check .
+
+      - name: Ruff format
+        run: uv run ruff format --check .
+
+      - name: Mypy
+        run: uv run mypy
+
+  test:
+    name: Tests (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install
+        run: uv sync --python ${{ matrix.python }}
+
+      # FLAKY_DEMO_DETERMINISTIC is deliberately NOT set here. The integration
+      # tests invoke examples/flaky_demo and expect it to be genuinely flaky; that
+      # is the whole point of them. The demo suite is excluded from ordinary
+      # collection by `norecursedirs`, so it cannot break this job on its own.
+      - name: Run tests
+        run: uv run pytest -q --cov=flaky_detective --cov-report=term
+
+  dogfood:
+    name: Run the tool on itself
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Same-commit divergence needs a commit SHA, and shallow clones still
+          # provide HEAD, so depth 1 is fine. Kept explicit because it matters.
+          fetch-depth: 1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install
+        run: uv sync --python 3.12
+
+      # Part one: find the flakes planted in examples/flaky_demo. This is the
+      # demonstration that the tool works on genuine nondeterminism.
+      - name: Hunt the demo suite
+        run: |
+          uv run flaky hunt -n 20 --seed 1 -- \
+            uv run pytest examples/flaky_demo -p no:cacheprovider -q
+
+      - name: Analyze
+        run: uv run flaky analyze --limit 30
+
+      - name: Database summary
+        run: uv run flaky stats
+
+      - name: Render reports
+        run: |
+          uv run flaky report --format html --output artifacts/flaky-report.html
+          uv run flaky report --format json --output artifacts/flaky-report.json
+          uv run flaky report --format md --output artifacts/flaky-report.md
+
+      - name: Show what would be quarantined
+        run: uv run flaky quarantine recommend
+
+      - name: Post the report on the pull request
+        if: github.event_name == 'pull_request'
+        run: cat artifacts/flaky-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: flaky-reports
+          path: artifacts/
+          if-no-files-found: error
+
+      # Part two: the tool's own test suite must be clean. If flaky-test-detective
+      # has flaky tests, nothing it reports is trustworthy.
+      #
+      # Integration tests are excluded because they hunt the demo suite themselves,
+      # and nesting a hunt inside a hunt only wastes runner minutes.
+      - name: Prove this project's own suite is stable
+        run: |
+          uv run flaky hunt -n 3 --seed 7 --db .flaky-self.db -- \
+            uv run pytest -q -m "not integration" -p no:cacheprovider
+          uv run flaky analyze --db .flaky-self.db --fail-on flaky

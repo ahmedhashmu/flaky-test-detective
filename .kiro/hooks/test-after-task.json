@@ -1,0 +1,15 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Test after spec task",
+      "trigger": "PostTaskExec",
+      "description": "Runs the fast test suite after each spec task is marked complete. Integration tests are excluded because they hunt the demo suite and take several seconds; CI runs those. The point is to catch a task that was marked done while something it touched is broken.",
+      "action": {
+        "type": "command",
+        "command": "uv run pytest -q -m \"not integration\"",
+        "timeout": 300
+      }
+    }
+  ]
+}
