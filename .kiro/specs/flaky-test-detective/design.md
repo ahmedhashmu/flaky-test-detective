@@ -123,9 +123,21 @@ score      = raw · (0.5 + 0.5 · confidence)
 
 Divergence is weighted higher because it is proof and flip rate is inference.
 The confidence factor never drops below 0.5, so a strong signal on few runs
-still surfaces — it just cannot outrank the same signal on many runs. When
-divergence is unavailable (no SHAs), weights renormalize onto flip rate alone
-rather than silently scoring everything low.
+still surfaces — it just cannot outrank the same signal on many runs.
+
+When divergence is unavailable (no SHAs), the weight renormalizes onto flip rate
+alone rather than silently scoring everything low — but capped:
+
+```
+raw = FLIP_ONLY_CEILING · flip_rate        # FLIP_ONLY_CEILING = 0.85
+```
+
+The cap was added after a test caught the original version scoring a perfectly
+alternating history at 1.00 with no commit data, identical to one backed by
+same-commit proof. Both are probably flaky, but only one has evidence that the
+code was not the variable. Without the cap the score stops carrying information
+about how much the verdict can be trusted, which is the reason for having a score
+rather than a boolean.
 
 ### Classification
 

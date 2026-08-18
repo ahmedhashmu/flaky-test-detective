@@ -88,13 +88,9 @@ def load_config(path: Path | None = None, start: Path | None = None) -> Config:
     base = config_path.parent
     return Config(
         db_path=_resolve(base, section.get("db"), Path(".flaky.db")),
-        quarantine_path=_resolve(
-            base, section.get("quarantine"), Path(".flaky-quarantine.json")
-        ),
+        quarantine_path=_resolve(base, section.get("quarantine"), Path(".flaky-quarantine.json")),
         flake_threshold=_number(section, "flake_threshold", DEFAULT_FLAKE_THRESHOLD),
-        quarantine_threshold=_number(
-            section, "quarantine_threshold", DEFAULT_QUARANTINE_THRESHOLD
-        ),
+        quarantine_threshold=_number(section, "quarantine_threshold", DEFAULT_QUARANTINE_THRESHOLD),
         confidence_runs=int(_number(section, "confidence_runs", DEFAULT_CONFIDENCE_RUNS)),
         fixed_run_streak=int(_number(section, "fixed_run_streak", DEFAULT_FIXED_RUN_STREAK)),
         hunt_iterations=int(_number(section, "hunt_iterations", DEFAULT_HUNT_ITERATIONS)),

@@ -93,9 +93,7 @@ def parse_file(
         raise ParseError("no <testcase> elements found")
 
     runner = detect_runner(root, suites, cases)
-    outcomes = tuple(
-        _to_outcome(case, position, runner) for position, case in enumerate(cases)
-    )
+    outcomes = tuple(_to_outcome(case, position, runner) for position, case in enumerate(cases))
 
     return TestRun(
         run_uid=_run_uid(raw, source, iteration),
@@ -112,9 +110,7 @@ def parse_file(
     )
 
 
-def detect_runner(
-    root: ET.Element, suites: list[ET.Element], cases: list[_Case]
-) -> str:
+def detect_runner(root: ET.Element, suites: list[ET.Element], cases: list[_Case]) -> str:
     """Identify the producing runner from structural fingerprints.
 
     Used for display and, more importantly, to pick the right randomization flag
@@ -165,7 +161,9 @@ def _read_report(source: Path) -> bytes:
     if size == 0:
         raise ParseError("file is empty")
     if size > MAX_REPORT_BYTES:
-        raise ParseError(f"file is {size / 1e6:.0f} MB, over the {MAX_REPORT_BYTES / 1e6:.0f} MB cap")
+        raise ParseError(
+            f"file is {size / 1e6:.0f} MB, over the {MAX_REPORT_BYTES / 1e6:.0f} MB cap"
+        )
 
     try:
         raw = source.read_bytes()
@@ -187,10 +185,7 @@ def _collect_suites(root: ET.Element) -> list[ET.Element]:
     Maven and Gradle nest testsuites inside testsuites; pytest does not. Walking
     the whole tree handles both without needing to know which we have.
     """
-    if root.tag == "testsuite":
-        suites = [root]
-    else:
-        suites = []
+    suites = [root] if root.tag == "testsuite" else []
     suites.extend(root.iter("testsuite"))
 
     # A suite that only contains other suites holds no cases of its own; keeping

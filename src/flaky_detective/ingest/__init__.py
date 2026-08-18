@@ -50,7 +50,7 @@ def expand_paths(paths: Sequence[str | Path]) -> list[Path]:
 def _expand_one(path: Path, raw: str) -> Iterator[Path]:
     if any(ch in raw for ch in "*?[") and not path.exists():
         base = Path(raw).anchor or "."
-        pattern = raw[len(base):] if base != "." else raw
+        pattern = raw[len(base) :] if base != "." else raw
         yield from (p for p in Path(base).glob(pattern) if p.is_file())
         return
 
@@ -112,9 +112,7 @@ def ingest_paths(
     if not files:
         return IngestResult(failures=(("(no input)", "no XML files matched"),))
 
-    runs, failures = parse_paths(
-        files, commit_sha=commit_sha, branch=branch, ci_run_id=ci_run_id
-    )
+    runs, failures = parse_paths(files, commit_sha=commit_sha, branch=branch, ci_run_id=ci_run_id)
 
     added = skipped = results = 0
     for run in runs:

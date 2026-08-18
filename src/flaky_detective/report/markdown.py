@@ -9,6 +9,9 @@ from __future__ import annotations
 
 from ..models import AnalysisReport, Cause, TestAnalysis, TriageReport, Verdict
 
+POSITION_DETAIL_THRESHOLD = 0.5
+"""Below this, position separation is supporting detail not worth printing."""
+
 VERDICT_MARK = {
     Verdict.FLAKY: "flaky",
     Verdict.REGRESSION: "regression",
@@ -46,9 +49,7 @@ def render_report(report: AnalysisReport, *, limit: int = 15) -> str:
     )
     for test in rows[:limit]:
         divergence = (
-            f"{test.divergent_commits}/{test.observed_commits}"
-            if test.observed_commits
-            else "-"
+            f"{test.divergent_commits}/{test.observed_commits}" if test.observed_commits else "-"
         )
         cause = test.cause.cause if test.cause else ""
         lines.append(
@@ -87,16 +88,17 @@ def _diagnosis(tests: list[TestAnalysis], limit: int = 5) -> list[str]:
         lines.append("")
 
         if test.order is not None:
-            lines.append(
-                f"- Order dependent: fails at position "
-                f"{test.order.mean_position_on_fail:.0f} on average, passes at "
-                f"{test.order.mean_position_on_pass:.0f} "
-                f"({test.order.separation:.1f} standard deviations apart)."
-            )
             if test.order.likely_polluter:
                 lines.append(
-                    f"- Fails after `{test.order.likely_polluter}` in "
+                    f"- **Order dependent**: fails after "
+                    f"`{test.order.likely_polluter}` in "
                     f"{test.order.polluter_failure_share:.0%} of its failures."
+                )
+            if test.order.separation >= POSITION_DETAIL_THRESHOLD:
+                lines.append(
+                    f"- Also runs later when it fails: position "
+                    f"{test.order.mean_position_on_fail:.0f} on average versus "
+                    f"{test.order.mean_position_on_pass:.0f} when passing."
                 )
         elif test.cause.matched:
             lines.append(
@@ -166,13 +168,15 @@ def render_triage(result: TriageReport) -> str:
 
     if result.all_known_flaky:
         lines.append(
-            f"**All {result.total_failures} failures are known flakes.** "
+            f"**All {_plural(result.total_failures, 'failure')} are known flakes.** "
             "No new breakage in this run."
         )
     else:
+        count = len(result.actionable)
         lines.append(
-            f"**{len(result.actionable)} failures need attention.** "
-            f"{len(result.known_flakes)} known flakes were set aside."
+            f"**{_plural(count, 'failure')} {'needs' if count == 1 else 'need'} "
+            f"attention.** {len(result.known_flakes)} known "
+            f"{'flake' if len(result.known_flakes) == 1 else 'flakes'} set aside."
         )
     lines.append("")
 
@@ -210,6 +214,10 @@ def render_triage(result: TriageReport) -> str:
         lines.extend(["", "</details>", ""])
 
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _plural(count: int, noun: str) -> str:
+    return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
 
 
 def _one_line(text: str, width: int = 100) -> str:

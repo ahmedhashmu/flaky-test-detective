@@ -22,13 +22,17 @@ from typing import Annotated
 import typer
 from rich.console import Console
 
-from . import __version__, report as report_module, runner
-from .analysis import analyze as analyze_outcomes, analyze_one, triage as triage_run
+from . import __version__, runner
+from . import report as report_module
+from .analysis import analyze as analyze_outcomes
+from .analysis import analyze_one
+from .analysis import triage as triage_run
 from .config import EXAMPLE_CONFIG, Config, load_config
 from .environment import detect
 from .ingest import ingest_paths, junit
 from .models import AnalysisReport, TestOutcome, Verdict
-from .quarantine import EXPORT_FORMATS, Quarantine, export as export_quarantine, recommend, verify
+from .quarantine import EXPORT_FORMATS, Quarantine, recommend, verify
+from .quarantine import export as export_quarantine
 from .report import console as console_report
 from .runner import HuntError
 from .storage import Storage, StorageError
@@ -166,7 +170,9 @@ def ingest(
         f"skipped {result.runs_skipped} already present."
     )
     if env.commit_sha:
-        stdout.print(f"Commit {env.commit_sha[:12]} on {env.branch or 'unknown branch'}", style="dim")
+        stdout.print(
+            f"Commit {env.commit_sha[:12]} on {env.branch or 'unknown branch'}", style="dim"
+        )
     else:
         stdout.print(
             "No commit SHA detected. Same-commit divergence, the strongest signal, "
@@ -287,7 +293,9 @@ def hunt(
     if summary.collected == 0:
         raise typer.Exit(EXIT_USAGE)
 
-    stdout.print(f"Found {len(summary.flaky_test_ids)} flaky tests. Run `flaky analyze` for detail.")
+    stdout.print(
+        f"Found {len(summary.flaky_test_ids)} flaky tests. Run `flaky analyze` for detail."
+    )
 
 
 @app.command()
@@ -319,9 +327,7 @@ def analyze(
 
 @app.command(name="report")
 def report_command(
-    fmt: Annotated[
-        str, typer.Option("--format", "-f", help="md, json, or html.")
-    ] = "md",
+    fmt: Annotated[str, typer.Option("--format", "-f", help="md, json, or html.")] = "md",
     output: Annotated[
         Path | None, typer.Option("--output", "-o", help="Write here instead of stdout.")
     ] = None,
@@ -360,9 +366,7 @@ def triage(
     ],
     db: DbOption = None,
     config: ConfigOption = None,
-    fmt: Annotated[
-        str, typer.Option("--format", "-f", help="console, md, or json.")
-    ] = "console",
+    fmt: Annotated[str, typer.Option("--format", "-f", help="console, md, or json.")] = "console",
     store_run: Annotated[
         bool,
         typer.Option("--ingest/--no-ingest", help="Also add this run to the history."),
@@ -438,9 +442,7 @@ def history(
     analysis = analyze_one(
         resolved, outcomes, settings, predecessors=build_predecessor_index(all_outcomes)
     )
-    timeline = [
-        (o.started_at or "", str(o.status), o.message) for o in outcomes[-limit:]
-    ]
+    timeline = [(o.started_at or "", str(o.status), o.message) for o in outcomes[-limit:]]
     console_report.render_history(resolved, analysis, timeline, stdout)
 
 
@@ -500,17 +502,14 @@ def quarantine_recommend(
 
     if not candidates:
         stdout.print(
-            f"Nothing scores above the quarantine threshold of "
-            f"{settings.quarantine_threshold:.2f}."
+            f"Nothing scores above the quarantine threshold of {settings.quarantine_threshold:.2f}."
         )
         return
 
     for test in candidates:
         cause = test.cause.cause if test.cause else "unknown"
         stdout.print(f"{test.score:.2f}  {test.test_id}")
-        stdout.print(
-            f"      {cause}, failed {test.failures} of {test.runs} runs", style="dim"
-        )
+        stdout.print(f"      {cause}, failed {test.failures} of {test.runs} runs", style="dim")
 
     if not apply:
         stdout.print()
@@ -536,7 +535,9 @@ def quarantine_recommend(
 @quarantine_app.command("add")
 def quarantine_add(
     test_id: Annotated[str, typer.Argument(help="Exact test id to quarantine.")],
-    reason: Annotated[str, typer.Option("--reason", help="Why it is being quarantined.")] = "manual",
+    reason: Annotated[
+        str, typer.Option("--reason", help="Why it is being quarantined.")
+    ] = "manual",
     days: Annotated[int | None, typer.Option("--days", help="Days until expiry.")] = None,
     db: DbOption = None,
     config: ConfigOption = None,
@@ -692,9 +693,7 @@ def _analyze(
             )
             raise typer.Exit(EXIT_USAGE)
 
-        outcomes: list[TestOutcome] = store.outcomes(
-            since=since, branch=branch, limit_runs=last
-        )
+        outcomes: list[TestOutcome] = store.outcomes(since=since, branch=branch, limit_runs=last)
 
     if not outcomes:
         stderr.print("No runs matched those filters.")
@@ -716,9 +715,7 @@ def _exit_code(result: AnalysisReport, fail_on: str) -> int:
     if fail_on == "none":
         return EXIT_OK
 
-    has_break = any(
-        t.verdict in (Verdict.REGRESSION, Verdict.BROKEN) for t in result.tests
-    )
+    has_break = any(t.verdict in (Verdict.REGRESSION, Verdict.BROKEN) for t in result.tests)
     if has_break:
         return EXIT_REGRESSION
     if fail_on == "flaky" and result.flaky:

@@ -35,6 +35,20 @@ CONFIDENCE_FLOOR = 0.5
 """A strong signal on few runs still surfaces; it just cannot outrank the same
 signal backed by many runs. Never zero, or new flakes would stay invisible."""
 
+FLIP_ONLY_CEILING = 0.85
+"""Highest score reachable when no run carried a commit SHA.
+
+Without commit data, flip rate is all there is, and flip rate is inference: a test
+that alternates pass and fail might be flaky, or the code might have changed
+between every run. A test with same-commit divergence has proof that the code was
+not the variable.
+
+Capping the inference-only path keeps the two distinguishable. Otherwise a
+perfectly alternating history with no commit data scores 1.00, exactly the same as
+one backed by proof, and the score stops carrying information about how much the
+verdict can be trusted.
+"""
+
 REGRESSION_STREAK = 3
 """Consecutive trailing failures after which a consistent failure is called a
 regression rather than a flake, even for a test with flaky history.
@@ -157,7 +171,7 @@ def _score(
         proof = max(divergence_rate, retry_rate) if has_commit_signal else retry_rate
         raw = DIVERGENCE_WEIGHT * proof + FLIP_WEIGHT * flip_rate
     else:
-        raw = flip_rate
+        raw = FLIP_ONLY_CEILING * flip_rate
 
     return min(1.0, raw * (CONFIDENCE_FLOOR + (1.0 - CONFIDENCE_FLOOR) * confidence))
 
@@ -307,8 +321,6 @@ def _ranked_signatures(outcomes: list[TestOutcome]) -> tuple[str, ...]:
     that is worth seeing rather than averaging away.
     """
     counter: Counter[str] = Counter(
-        o.signature
-        for o in outcomes
-        if o.signature and (o.status.is_failure or o.retried)
+        o.signature for o in outcomes if o.signature and (o.status.is_failure or o.retried)
     )
     return tuple(signature for signature, _ in counter.most_common())

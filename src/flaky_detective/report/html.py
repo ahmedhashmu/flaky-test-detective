@@ -14,6 +14,9 @@ from html import escape
 
 from ..models import AnalysisReport, TestAnalysis, Verdict
 
+POSITION_DETAIL_THRESHOLD = 0.5
+"""Below this, position separation is supporting detail not worth printing."""
+
 _STYLE = """
 :root {
   --bg: #ffffff; --fg: #1a1a1a; --muted: #6b7280; --line: #e5e7eb;
@@ -57,8 +60,9 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 .bar { height: 4px; border-radius: 2px; background: var(--line); overflow: hidden;
        min-width: 44px; }
 .bar > i { display: block; height: 100%; background: var(--flaky); }
-.note { border-left: 3px solid var(--flaky); background: color-mix(in srgb, var(--flaky) 8%, transparent);
-        padding: .7rem .9rem; border-radius: 0 6px 6px 0; margin: 1.25rem 0; font-size: .875rem; }
+.note { border-left: 3px solid var(--flaky); padding: .7rem .9rem;
+        background: color-mix(in srgb, var(--flaky) 8%, transparent);
+        border-radius: 0 6px 6px 0; margin: 1.25rem 0; font-size: .875rem; }
 details { margin: .5rem 0; }
 summary { cursor: pointer; color: var(--accent); font-size: .875rem; }
 .diag { border: 1px solid var(--line); border-radius: 8px; padding: .8rem 1rem; margin: .6rem 0; }
@@ -116,10 +120,7 @@ def render_report(report: AnalysisReport, *, limit: int = 100) -> str:
 def _window(report: AnalysisReport) -> str:
     window = ""
     if report.window_start and report.window_end:
-        window = (
-            f" &middot; {escape(report.window_start[:10])} to "
-            f"{escape(report.window_end[:10])}"
-        )
+        window = f" &middot; {escape(report.window_start[:10])} to {escape(report.window_end[:10])}"
     return (
         f"{report.total_runs} runs &middot; {report.total_results} results &middot; "
         f"{len(report.tests)} tests{window}"
@@ -178,9 +179,7 @@ def _tests_table(tests: list[TestAnalysis]) -> str:
 
 
 def _diagnosis(tests: list[TestAnalysis], limit: int = 8) -> str:
-    interesting = [
-        t for t in tests if t.verdict is Verdict.FLAKY and t.cause is not None
-    ][:limit]
+    interesting = [t for t in tests if t.verdict is Verdict.FLAKY and t.cause is not None][:limit]
     if not interesting:
         return ""
 
@@ -190,16 +189,17 @@ def _diagnosis(tests: list[TestAnalysis], limit: int = 8) -> str:
         points: list[str] = []
 
         if test.order is not None:
-            points.append(
-                f"Order dependent: fails at position "
-                f"{test.order.mean_position_on_fail:.0f} on average, passes at "
-                f"{test.order.mean_position_on_pass:.0f} "
-                f"({test.order.separation:.1f} standard deviations apart)."
-            )
             if test.order.likely_polluter:
                 points.append(
-                    f"Fails after <code>{escape(test.order.likely_polluter)}</code> in "
+                    f"<strong>Order dependent</strong>: fails after "
+                    f"<code>{escape(test.order.likely_polluter)}</code> in "
                     f"{test.order.polluter_failure_share:.0%} of its failures."
+                )
+            if test.order.separation >= POSITION_DETAIL_THRESHOLD:
+                points.append(
+                    f"Also runs later when it fails: position "
+                    f"{test.order.mean_position_on_fail:.0f} on average versus "
+                    f"{test.order.mean_position_on_pass:.0f} when passing."
                 )
         elif test.cause.matched:
             terms = ", ".join(f"<code>{escape(m)}</code>" for m in test.cause.matched)
@@ -213,8 +213,7 @@ def _diagnosis(tests: list[TestAnalysis], limit: int = 8) -> str:
 
         items = "".join(f"<li>{p}</li>" for p in points)
         blocks.append(
-            f'<div class="diag"><h3><code>{escape(test.test_id)}</code></h3>'
-            f"<ul>{items}</ul></div>"
+            f'<div class="diag"><h3><code>{escape(test.test_id)}</code></h3><ul>{items}</ul></div>'
         )
 
     return "".join(blocks)
@@ -236,7 +235,7 @@ def _clusters(report: AnalysisReport, limit: int = 15) -> str:
     )
     return (
         "<h2>Shared failure signatures</h2>"
-        "<p class=\"sub\">One cause, several tests. Usually the cheapest thing to fix.</p>"
+        '<p class="sub">One cause, several tests. Usually the cheapest thing to fix.</p>'
         '<table><thead><tr><th class="n">Tests</th><th class="n">Failures</th>'
         "<th>Cause</th><th>Signature</th></tr></thead>"
         f"<tbody>{rows}</tbody></table>"

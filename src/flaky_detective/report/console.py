@@ -18,6 +18,7 @@ from rich.text import Text
 from ..models import (
     AnalysisReport,
     Cause,
+    DatabaseStats,
     FailureCluster,
     TestAnalysis,
     TriageReport,
@@ -121,6 +122,14 @@ def _render_headline(report: AnalysisReport, out: Console) -> None:
     )
 
 
+POSITION_DETAIL_THRESHOLD = 0.5
+"""Below this, position separation is not worth reporting.
+
+Order dependence is established by naming a polluter, not by position, so a
+near-zero separation is normal and printing it only invites the reader to doubt a
+sound verdict.
+"""
+
 FIXED_COLUMNS_WIDTH = 64
 """Total width of every column except the test id, including separators.
 
@@ -155,9 +164,7 @@ def _tests_table(tests: list[TestAnalysis], prefix: str = "", width: int = 100) 
 
     for test in tests:
         divergence = (
-            f"{test.divergent_commits}/{test.observed_commits}"
-            if test.observed_commits
-            else "-"
+            f"{test.divergent_commits}/{test.observed_commits}" if test.observed_commits else "-"
         )
         cause = CAUSE_LABEL.get(test.cause.cause, "") if test.cause else ""
 
@@ -200,7 +207,7 @@ def _common_prefix(test_ids: list[str]) -> str:
 
 
 def _strip(test_id: str, prefix: str) -> str:
-    return test_id[len(prefix):] if prefix and test_id.startswith(prefix) else test_id
+    return test_id[len(prefix) :] if prefix and test_id.startswith(prefix) else test_id
 
 
 def _render_diagnosis(tests: list[TestAnalysis], out: Console) -> None:
@@ -228,23 +235,26 @@ def _render_diagnosis(tests: list[TestAnalysis], out: Console) -> None:
         assert test.cause is not None
 
         if test.order is not None:
-            detail = (
-                f"    order dependent: fails at position "
-                f"{test.order.mean_position_on_fail:.0f} on average, passes at "
-                f"{test.order.mean_position_on_pass:.0f} "
-                f"({test.order.separation:.1f} standard deviations apart)"
-            )
-            out.print(detail, style="cyan")
+            # The polluter is the evidence the verdict rests on, so it leads.
             if test.order.likely_polluter:
                 out.print(
-                    f"    fails after {_short(test.order.likely_polluter)} in "
-                    f"{test.order.polluter_failure_share:.0%} of failures",
+                    f"    order dependent: fails after "
+                    f"{_short(test.order.likely_polluter)} in "
+                    f"{test.order.polluter_failure_share:.0%} of its failures",
                     style="cyan",
+                )
+            # Position separation is supporting detail only, and near zero it says
+            # nothing worth the line it would occupy.
+            if test.order.separation >= POSITION_DETAIL_THRESHOLD:
+                out.print(
+                    f"    also runs later when it fails: position "
+                    f"{test.order.mean_position_on_fail:.0f} on average versus "
+                    f"{test.order.mean_position_on_pass:.0f} when passing",
+                    style="dim",
                 )
         elif test.cause.matched:
             out.print(
-                f"    likely {test.cause.cause} "
-                f"(matched: {', '.join(test.cause.matched)})",
+                f"    likely {test.cause.cause} (matched: {', '.join(test.cause.matched)})",
                 style="cyan",
             )
 
@@ -310,9 +320,7 @@ def _render_caveats(report: AnalysisReport, out: Console) -> None:
         )
 
 
-def render_triage(
-    result: TriageReport, console: Console | None = None, *, limit: int = 20
-) -> None:
+def render_triage(result: TriageReport, console: Console | None = None, *, limit: int = 20) -> None:
     """Print the build-duty answer: investigate, or re-run?"""
     out = console or Console()
 
@@ -324,8 +332,8 @@ def render_triage(
         out.print(
             Panel(
                 Text(
-                    f"All {result.total_failures} failures are known flakes. "
-                    "No new breakage.",
+                    f"All {_plural(result.total_failures, 'failure')} "
+                    "are known flakes. No new breakage.",
                     style="bold yellow",
                 ),
                 border_style="yellow",
@@ -333,11 +341,14 @@ def render_triage(
             )
         )
     else:
+        count = len(result.actionable)
         out.print(
             Panel(
                 Text(
-                    f"{len(result.actionable)} failures need attention "
-                    f"({len(result.known_flakes)} known flakes ignored)",
+                    f"{_plural(count, 'failure')} "
+                    f"{'needs' if count == 1 else 'need'} attention "
+                    f"({len(result.known_flakes)} known "
+                    f"{'flake' if len(result.known_flakes) == 1 else 'flakes'} ignored)",
                     style="bold red",
                 ),
                 border_style="red",
@@ -376,7 +387,7 @@ def render_triage(
             out.print(f"      {evidence}", style="dim")
 
 
-def render_stats(stats: dict[str, object], console: Console | None = None) -> None:
+def render_stats(stats: DatabaseStats, console: Console | None = None) -> None:
     """Print a database summary."""
     out = console or Console()
 
@@ -384,33 +395,34 @@ def render_stats(stats: dict[str, object], console: Console | None = None) -> No
     table.add_column("field", style="dim")
     table.add_column("value")
 
-    runners = stats.get("runners") or {}
-    runner_text = (
-        ", ".join(f"{name} ({count})" for name, count in runners.items())  # type: ignore[union-attr]
-        if runners
-        else "none"
-    )
-
-    for label, key in (
-        ("database", "path"),
-        ("runs", "runs"),
-        ("results", "results"),
-        ("distinct tests", "tests"),
-        ("failures", "failures"),
-        ("commits", "commits"),
-        ("branches", "branches"),
+    for label, value in (
+        ("database", stats.path),
+        ("runs", str(stats.runs)),
+        ("results", str(stats.results)),
+        ("distinct tests", str(stats.tests)),
+        ("failures", str(stats.failures)),
+        ("commits", str(stats.commits)),
+        ("branches", str(stats.branches)),
+        (
+            "runners",
+            ", ".join(f"{name} ({count})" for name, count in stats.runners.items()) or "none",
+        ),
+        ("first run", _date(stats.first_run or "") or "-"),
+        ("last run", _date(stats.last_run or "") or "-"),
     ):
-        table.add_row(label, str(stats.get(key, "-")))
-
-    table.add_row("runners", runner_text)
-    table.add_row("first run", _date(str(stats.get("first_run") or "")) or "-")
-    table.add_row("last run", _date(str(stats.get("last_run") or "")) or "-")
+        table.add_row(label, value)
 
     out.print(table)
 
+    if stats.is_empty:
+        out.print()
+        out.print("Nothing recorded yet. Start with:\n  flaky hunt -- pytest tests/", style="dim")
+
 
 def render_history(
-    test_id: str, analysis: TestAnalysis, timeline: list[tuple[str, str, str | None]],
+    test_id: str,
+    analysis: TestAnalysis,
+    timeline: list[tuple[str, str, str | None]],
     console: Console | None = None,
 ) -> None:
     """Print one test's timeline.
@@ -441,8 +453,8 @@ def render_history(
     table.add_column("failure", overflow="fold")
 
     for started_at, status, message in timeline:
-        style = "red" if status in ("failed", "error") else (
-            "dim" if status == "skipped" else "green"
+        style = (
+            "red" if status in ("failed", "error") else ("dim" if status == "skipped" else "green")
         )
         table.add_row(
             _date(started_at, with_time=True),
@@ -460,11 +472,15 @@ def render_history(
         out.print(f"  {analysis.cause.remediation}", style="dim")
 
 
+def _plural(count: int, noun: str) -> str:
+    return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
+
+
 def _short(test_id: str, width: int = 78) -> str:
     """Trim from the left, because the distinguishing part of a test id is the end."""
     if len(test_id) <= width:
         return test_id
-    return "..." + test_id[-(width - 3):]
+    return "..." + test_id[-(width - 3) :]
 
 
 def _one_line(text: str, width: int = 100) -> str:

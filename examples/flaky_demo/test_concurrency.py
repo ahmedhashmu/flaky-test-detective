@@ -72,10 +72,10 @@ def test_append_order_is_stable() -> None:
         with guard:
             collected.append(index)
 
-    # Three threads, so a correctly-ordered result is genuinely reachable. Six
-    # would make ordered completion so unlikely that the test would simply always
-    # fail.
-    workers = [threading.Thread(target=work, args=(i,)) for i in range(3)]
+    # Two threads, giving a roughly even chance of ordered completion. Three made
+    # the test fail five runs in six, which is often enough that it never passes
+    # during a short hunt and gets reported as `broken` instead of flaky.
+    workers = [threading.Thread(target=work, args=(i,)) for i in range(2)]
     for worker in workers:
         worker.start()
     for worker in workers:

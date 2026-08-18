@@ -21,13 +21,14 @@ SIGNATURE_MAX_LENGTH = 500
 _SUBSTITUTIONS: tuple[tuple[re.Pattern[str], str], ...] = (
     # Most specific first. Reordering this tuple changes clustering behaviour.
     (
-        re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"),
+        re.compile(
+            r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"
+            r"-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"
+        ),
         "<UUID>",
     ),
     (
-        re.compile(
-            r"\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?"
-        ),
+        re.compile(r"\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?"),
         "<TIMESTAMP>",
     ),
     (re.compile(r"\b\d{2}:\d{2}:\d{2}(?:[.,]\d+)?\b"), "<TIME>"),
@@ -45,7 +46,10 @@ _SUBSTITUTIONS: tuple[tuple[re.Pattern[str], str], ...] = (
         ),
         "<TMP>",
     ),
-    (re.compile(r"[A-Za-z]:\\+(?:Users\\+[^\\\s]+\\+)?AppData\\+Local\\+Temp[^\s'\"<>),;]*"), "<TMP>"),
+    (
+        re.compile(r"[A-Za-z]:\\+(?:Users\\+[^\\\s]+\\+)?AppData\\+Local\\+Temp[^\s'\"<>),;]*"),
+        "<TMP>",
+    ),
     (re.compile(r"[A-Za-z]:\\+(?:[\w.\-+@]+\\+)+[\w.\-+@]*"), "<PATH>"),
     (re.compile(r"(?<![\w<])/(?:[\w.\-+@]+/)+[\w.\-+@]*"), "<PATH>"),
     # Source locations must be handled before host:port, because `store_test.go:41`
@@ -60,13 +64,14 @@ _SUBSTITUTIONS: tuple[tuple[re.Pattern[str], str], ...] = (
         r"\1:<N>",
     ),
     (
-        re.compile(
-            r"(localhost|<IP>|[a-zA-Z0-9][a-zA-Z0-9.\-]*\.[a-zA-Z]{2,}):\d{1,5}\b"
-        ),
+        re.compile(r"(localhost|<IP>|[a-zA-Z0-9][a-zA-Z0-9.\-]*\.[a-zA-Z]{2,}):\d{1,5}\b"),
         r"\1:<PORT>",
     ),
     (re.compile(r"\bport\s+\d{1,5}\b", re.IGNORECASE), "port <PORT>"),
-    (re.compile(r"\b(line|lineno|row|col|column|offset)\s*[:=]?\s*\d+\b", re.IGNORECASE), r"\1 <N>"),
+    (
+        re.compile(r"\b(line|lineno|row|col|column|offset)\s*[:=]?\s*\d+\b", re.IGNORECASE),
+        r"\1 <N>",
+    ),
     (
         re.compile(
             r"\b\d+(?:\.\d+)?\s*(?:ms|us|\u00b5s|ns|sec|secs|second|seconds|minutes?|hours?|s)\b"
@@ -81,9 +86,7 @@ _SUBSTITUTIONS: tuple[tuple[re.Pattern[str], str], ...] = (
     # Same reasoning for lists of quoted strings: "order was ['beta', 'alpha']"
     # describes one bug but reads as a new signature on every run.
     (
-        re.compile(
-            r"""[\[(]\s*(['"])[^'"]*\1(?:\s*,\s*(['"])[^'"]*\2)+\s*[\])]"""
-        ),
+        re.compile(r"""[\[(]\s*(['"])[^'"]*\1(?:\s*,\s*(['"])[^'"]*\2)+\s*[\])]"""),
         "[<LIST>]",
     ),
     (re.compile(r"\b\d{3,}\b"), "<NUM>"),
@@ -191,6 +194,3 @@ def salient_line(detail: str | None) -> str:
     # would be a header ("WARNING: DATA RACE") rather than the cause.
     lines = [line.strip() for line in detail.splitlines() if line.strip()]
     return lines[-1] if lines else ""
-
-
-

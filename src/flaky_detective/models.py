@@ -300,6 +300,26 @@ class TriageReport:
 
 
 @dataclass(frozen=True, slots=True)
+class DatabaseStats:
+    """Summary of what a history database contains."""
+
+    path: str
+    runs: int = 0
+    results: int = 0
+    tests: int = 0
+    failures: int = 0
+    commits: int = 0
+    branches: int = 0
+    first_run: str | None = None
+    last_run: str | None = None
+    runners: dict[str, int] = field(default_factory=dict)
+
+    @property
+    def is_empty(self) -> bool:
+        return self.runs == 0
+
+
+@dataclass(frozen=True, slots=True)
 class IngestResult:
     """Outcome of an ingest batch.
 

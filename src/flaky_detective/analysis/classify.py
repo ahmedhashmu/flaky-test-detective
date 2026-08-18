@@ -257,9 +257,7 @@ def classify(
 
     text = "\n".join(m for m in messages if m)
     if not text.strip():
-        return CauseEvidence(
-            cause=Cause.UNKNOWN, remediation=_REMEDIATION_UNKNOWN, confidence=0.0
-        )
+        return CauseEvidence(cause=Cause.UNKNOWN, remediation=_REMEDIATION_UNKNOWN, confidence=0.0)
 
     best: CauseEvidence | None = None
     for rule in _RULES:
@@ -279,9 +277,7 @@ def classify(
             )
 
     if best is None:
-        return CauseEvidence(
-            cause=Cause.UNKNOWN, remediation=_REMEDIATION_UNKNOWN, confidence=0.0
-        )
+        return CauseEvidence(cause=Cause.UNKNOWN, remediation=_REMEDIATION_UNKNOWN, confidence=0.0)
     return best
 
 

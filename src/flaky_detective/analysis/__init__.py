@@ -50,9 +50,7 @@ def analyze(outcomes: list[TestOutcome], config: Config | None = None) -> Analys
 
     analyses: list[TestAnalysis] = []
     for test_id, test_outcomes in by_test.items():
-        analyses.append(
-            analyze_one(test_id, test_outcomes, settings, predecessors=predecessors)
-        )
+        analyses.append(analyze_one(test_id, test_outcomes, settings, predecessors=predecessors))
 
     # Sort by score, then test_id. The explicit tiebreaker keeps output stable
     # between runs when scores tie, which they often do at 0.0.

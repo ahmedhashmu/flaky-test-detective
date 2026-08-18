@@ -34,6 +34,7 @@ within a file or class.
 
 from __future__ import annotations
 
+import itertools
 import math
 import statistics
 from collections import Counter, defaultdict
@@ -110,8 +111,8 @@ def build_predecessor_index(outcomes: list[TestOutcome]) -> PredecessorIndex:
 
     index: PredecessorIndex = {}
     for run_uid, run_outcomes in by_run.items():
-        ordered = sorted(run_outcomes, key=lambda o: (o.position or 0))
-        for previous, current in zip(ordered, ordered[1:], strict=False):
+        ordered = sorted(run_outcomes, key=lambda o: o.position or 0)
+        for previous, current in itertools.pairwise(ordered):
             index[(run_uid, current.test_id)] = previous.test_id
     return index
 
@@ -125,9 +126,7 @@ def detect_order_dependence(
     Returns None when there is not enough evidence, which is the common case and
     not a failure. Skips are excluded: they carry no information about outcome.
     """
-    passes = [
-        o for o in outcomes if o.status.is_pass and o.position is not None and not o.retried
-    ]
+    passes = [o for o in outcomes if o.status.is_pass and o.position is not None and not o.retried]
     failures = [o for o in outcomes if o.status.is_failure and o.position is not None]
     # A retry means the runner saw this test both fail and pass at one position,
     # so it is evidence of failing there.

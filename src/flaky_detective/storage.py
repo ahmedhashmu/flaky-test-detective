@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from types import TracebackType
 
-from .models import Status, TestOutcome, TestRun
+from .models import DatabaseStats, Status, TestOutcome, TestRun
 
 SCHEMA_VERSION = 1
 DEFAULT_DB_NAME = ".flaky.db"
@@ -241,13 +241,16 @@ class Storage:
             params.append(limit_runs)
 
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        # Only two things are interpolated: a module-level column list, and a WHERE
+        # clause assembled from the fixed literal strings above. Every user-supplied
+        # value travels in `params` as a bound parameter.
         sql = f"""
             SELECT {_OUTCOME_COLUMNS}
             FROM results r
             JOIN runs u ON u.id = r.run_id
             {where}
             ORDER BY u.started_at ASC, u.id ASC, r.position ASC, r.id ASC
-        """
+        """  # noqa: S608 - interpolates only internal constants; values are bound
         rows = self._conn.execute(sql, params).fetchall()
         return [_row_to_outcome(row) for row in rows]
 
@@ -258,7 +261,7 @@ class Storage:
             JOIN runs u ON u.id = r.run_id
             WHERE r.test_id = ?
             ORDER BY u.started_at ASC, u.id ASC, r.id ASC
-        """
+        """  # noqa: S608 - interpolates only a module constant; test_id is bound
         rows = self._conn.execute(sql, (test_id,)).fetchall()
         return [_row_to_outcome(row) for row in rows]
 
@@ -278,7 +281,7 @@ class Storage:
         row = self._conn.execute("SELECT COUNT(*) AS n FROM results").fetchone()
         return int(row["n"])
 
-    def stats(self) -> dict[str, object]:
+    def stats(self) -> DatabaseStats:
         runs = self._conn.execute(
             """
             SELECT COUNT(*) AS runs,
@@ -301,18 +304,18 @@ class Storage:
             "SELECT runner, COUNT(*) AS n FROM runs GROUP BY runner ORDER BY n DESC"
         ).fetchall()
 
-        return {
-            "path": str(self.path),
-            "runs": int(runs["runs"] or 0),
-            "commits": int(runs["commits"] or 0),
-            "branches": int(runs["branches"] or 0),
-            "first_run": runs["first_run"],
-            "last_run": runs["last_run"],
-            "results": int(results["results"] or 0),
-            "tests": int(results["tests"] or 0),
-            "failures": int(results["failures"] or 0),
-            "runners": {str(r["runner"]): int(r["n"]) for r in runners},
-        }
+        return DatabaseStats(
+            path=str(self.path),
+            runs=int(runs["runs"] or 0),
+            commits=int(runs["commits"] or 0),
+            branches=int(runs["branches"] or 0),
+            first_run=runs["first_run"],
+            last_run=runs["last_run"],
+            results=int(results["results"] or 0),
+            tests=int(results["tests"] or 0),
+            failures=int(results["failures"] or 0),
+            runners={str(r["runner"]): int(r["n"]) for r in runners},
+        )
 
     def recent_runs(self, limit: int = 20) -> list[dict[str, object]]:
         rows = self._conn.execute(

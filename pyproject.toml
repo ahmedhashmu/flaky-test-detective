@@ -23,8 +23,8 @@ dependencies = [
 ]
 
 [project.urls]
-Repository = "https://github.com/ahmedpact/flaky-test-detective"
-Issues = "https://github.com/ahmedpact/flaky-test-detective/issues"
+Repository = "https://github.com/ahmedhashmu/flaky-test-detective"
+Issues = "https://github.com/ahmedhashmu/flaky-test-detective/issues"
 
 [project.scripts]
 flaky = "flaky_detective.cli:main"
@@ -81,8 +81,17 @@ ignore = [
     "S101",  # assert is fine in tests and in internal invariants
 ]
 
+[tool.ruff.lint.isort]
+known-first-party = ["flaky_detective"]
+# conftest is imported by name from within tests/, which is on sys.path there.
+known-local-folder = ["conftest"]
+
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S603", "S607"]  # tests legitimately invoke subprocesses
+# Tests legitimately shell out, and use `random` to build shuffled scenarios.
+"tests/*" = ["S603", "S607", "S311"]
+# The demo suite's whole purpose is genuine nondeterminism. Unseeded `random` and
+# real sockets are the feature, not an oversight.
+"examples/*" = ["S311"]
 
 [tool.mypy]
 python_version = "3.11"

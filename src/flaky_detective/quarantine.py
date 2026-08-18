@@ -189,9 +189,7 @@ class Quarantine:
         return self._entries.pop(test_id, None) is not None
 
 
-def recommend(
-    report: AnalysisReport, config: Config | None = None
-) -> list[TestAnalysis]:
+def recommend(report: AnalysisReport, config: Config | None = None) -> list[TestAnalysis]:
     """Tests whose score justifies removing them from the suite.
 
     The bar is higher than the flake threshold on purpose: naming a flake is cheap,
@@ -284,10 +282,7 @@ def _pytest_deselect(entries: list[QuarantineEntry]) -> str:
         return "# No active quarantine entries.\n"
 
     args = " ".join(f'--deselect "{e.test_id}"' for e in entries)
-    return (
-        "# Quarantined flaky tests. Paste after your pytest command:\n"
-        f"{args}\n"
-    )
+    return f"# Quarantined flaky tests. Paste after your pytest command:\n{args}\n"
 
 
 def _pytest_conftest(entries: list[QuarantineEntry]) -> str:

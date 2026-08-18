@@ -216,8 +216,7 @@ def plan_hunt(
                 notes.append(
                     f"Order randomization is unavailable for {spec.name}: none of "
                     f"{', '.join(t for t, _ in spec.shuffle_flags) or 'its flags'} "
-                    "appeared in the command's --help output. "
-                    + _shuffle_hint(spec.name)
+                    "appeared in the command's --help output. " + _shuffle_hint(spec.name)
                 )
 
     return HuntPlan(
