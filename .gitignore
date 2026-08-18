@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Flaky Test Detective's own output. History is machine-local by default; see the
+# README for how to share it across a team.
+.flaky.db
+.flaky.db-wal
+.flaky.db-shm
+*.flaky.db
+reports/
+flaky-report.html
+
+# Editors / OS
+.DS_Store
+.idea/
+*.swp
+
+# NOTE: .kiro/ is deliberately NOT ignored. The specs, steering files, and hooks
+# are part of this project's record of how it was built, and the hackathon rules
+# require them to be present in the repository.

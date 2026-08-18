@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="9" time="0.019" timestamp="2026-08-18T13:40:32.954582+05:00"><testcase classname="tests.test_sample" name="test_passes" time="0.000" /><testcase classname="tests.test_sample" name="test_fails_assertion" time="0.000"><failure message="AssertionError: assert 1 == 2">def test_fails_assertion():
+&gt;       assert 1 == 2

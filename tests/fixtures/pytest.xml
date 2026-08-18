@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="4" skipped="1" tests="9" time="0.019" timestamp="2026-08-18T13:40:32.954582+05:00" hostname="Umars-MacBook-Pro.local"><testcase classname="tests.test_sample" name="test_passes" time="0.000" /><testcase classname="tests.test_sample" name="test_fails_assertion" time="0.000"><failure message="AssertionError: assert {'name': 'widget', 'count': 4} == {'name': 'widget', 'count': 3}&#10;  &#10;  Omitting 1 identical items, use -vv to show&#10;  Differing items:&#10;  {'count': 4} != {'count': 3}&#10;  Use -v to get more diff">def test_fails_assertion():
+        expected = {"name": "widget", "count": 3}
+        actual = {"name": "widget", "count": 4}
+&gt;       assert actual == expected
+E       AssertionError: assert {'name': 'widget', 'count': 4} == {'name': 'widget', 'count': 3}
+E         
+E         Omitting 1 identical items, use -vv to show
+E         Differing items:
+E         {'count': 4} != {'count': 3}
+E         Use -v to get more diff
+
+tests/test_sample.py:11: AssertionError</failure></testcase><testcase classname="tests.test_sample" name="test_raises_error" time="0.000"><failure message="ConnectionRefusedError: connection refused to localhost:5432">def test_raises_error():
+&gt;       raise ConnectionRefusedError("connection refused to localhost:5432")
+E       ConnectionRefusedError: connection refused to localhost:5432
+
+tests/test_sample.py:15: ConnectionRefusedError</failure></testcase><testcase classname="tests.test_sample" name="test_skipped" time="0.000"><skipped type="pytest.skip" message="not implemented yet">/private/tmp/ftd_fixture_gen/tests/test_sample.py:18: not implemented yet</skipped></testcase><testcase classname="tests.test_sample" name="test_parametrized[1]" time="0.000" /><testcase classname="tests.test_sample" name="test_parametrized[2]" time="0.000" /><testcase classname="tests.test_sample" name="test_parametrized[3]" time="0.000"><failure message="assert 3 &lt; 3">value = 3
+
+    @pytest.mark.parametrize("value", [1, 2, 3])
+    def test_parametrized(value):
+&gt;       assert value &lt; 3
+E       assert 3 &lt; 3
+
+tests/test_sample.py:25: AssertionError</failure></testcase><testcase classname="tests.test_sample.TestGrouped" name="test_inside_class_passes" time="0.000" /><testcase classname="tests.test_sample.TestGrouped" name="test_inside_class_fails" time="0.000"><failure message="TimeoutError: operation timed out after 30.0s waiting for lock">self = &lt;test_sample.TestGrouped object at 0x1068abb10&gt;
+
+    def test_inside_class_fails(self):
+&gt;       raise TimeoutError("operation timed out after 30.0s waiting for lock")
+E       TimeoutError: operation timed out after 30.0s waiting for lock
+
+tests/test_sample.py:33: TimeoutError</failure></testcase></testsuite></testsuites>

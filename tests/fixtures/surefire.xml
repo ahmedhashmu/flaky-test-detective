@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" name="com.acme.widget.CartTest" time="3.412" tests="5" errors="1" skipped="1" failures="1">
+  <properties>
+    <property name="java.version" value="21.0.3"/>
+    <property name="surefire.real.class.name" value="com.acme.widget.CartTest"/>
+  </properties>
+  <testcase name="sumsLineItems" classname="com.acme.widget.CartTest" time="0.031"/>
+  <testcase name="appliesPercentageDiscount" classname="com.acme.widget.CartTest" time="0.014">
+    <failure message="expected: &lt;2000&gt; but was: &lt;1900&gt;" type="org.opentest4j.AssertionFailedError">org.opentest4j.AssertionFailedError: expected: &lt;2000&gt; but was: &lt;1900&gt;
+	at com.acme.widget.CartTest.appliesPercentageDiscount(CartTest.java:44)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+</failure>
+  </testcase>
+  <testcase name="reservesInventoryUnderLoad" classname="com.acme.widget.CartTest" time="2.114">
+    <flakyFailure message="Timed out after 2000 ms waiting for inventory lock" type="java.util.concurrent.TimeoutException">java.util.concurrent.TimeoutException: Timed out after 2000 ms waiting for inventory lock
+	at com.acme.widget.CartTest.reservesInventoryUnderLoad(CartTest.java:71)
+</flakyFailure>
+  </testcase>
+  <testcase name="callsPricingService" classname="com.acme.widget.CartTest" time="1.240">
+    <error message="Connection refused: connect to pricing.internal:8443" type="java.net.ConnectException">java.net.ConnectException: Connection refused: connect to pricing.internal:8443
+	at java.base/sun.nio.ch.Net.pollConnect(Net.java)
+	at com.acme.widget.PricingClient.fetch(PricingClient.java:58)
+</error>
+  </testcase>
+  <testcase name="refundsOnFailure" classname="com.acme.widget.CartTest" time="0">
+    <skipped message="refund flow not implemented"/>
+  </testcase>
+</testsuite>

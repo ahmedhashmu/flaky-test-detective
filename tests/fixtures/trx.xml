@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<testsuites>
+  <testsuite name="Acme.Widget.Tests.dll" tests="4" failures="1" errors="0" skipped="1" time="0.9124" timestamp="2026-08-18T11:31:44">
+    <testcase name="Acme.Widget.Tests.CartTests.SumsLineItems" classname="Acme.Widget.Tests.CartTests" time="0.0113" />
+    <testcase name="Acme.Widget.Tests.CartTests.AppliesDiscount" classname="Acme.Widget.Tests.CartTests" time="0.0231">
+      <failure message="Assert.Equal() Failure&#xD;&#xA;Expected: 2000&#xD;&#xA;Actual:   1900" type="Xunit.Sdk.EqualException">   at Acme.Widget.Tests.CartTests.AppliesDiscount() in C:\build\src\Acme.Widget.Tests\CartTests.cs:line 52</failure>
+    </testcase>
+    <testcase name="Acme.Widget.Tests.CartTests.LoadsPricesFromCache" classname="Acme.Widget.Tests.CartTests" time="0.8654" />
+    <testcase name="Acme.Widget.Tests.CartTests.RefundsOnFailure" classname="Acme.Widget.Tests.CartTests" time="0">
+      <skipped message="Refund flow not implemented" />
+    </testcase>
+  </testsuite>
+</testsuites>

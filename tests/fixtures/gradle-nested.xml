@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="Gradle Test Run :app:test" tests="4" failures="1" errors="0" time="1.802">
+  <testsuite name="com.acme.app.LoginFlowTest" tests="2" failures="1" errors="0" skipped="0" time="1.204" timestamp="2026-08-18T10:02:11">
+    <testcase name="redirectsAfterLogin" classname="com.acme.app.LoginFlowTest" time="0.402"/>
+    <testcase name="rejectsExpiredSession" classname="com.acme.app.LoginFlowTest" time="0.802">
+      <failure message="Session token 550e8400-e29b-41d4-a716-446655440000 was still valid" type="java.lang.AssertionError">java.lang.AssertionError: Session token 550e8400-e29b-41d4-a716-446655440000 was still valid
+	at com.acme.app.LoginFlowTest.rejectsExpiredSession(LoginFlowTest.java:63)
+</failure>
+    </testcase>
+  </testsuite>
+  <testsuite name="com.acme.app.SettingsTest" tests="2" failures="0" errors="0" skipped="1" time="0.598" timestamp="2026-08-18T10:02:13">
+    <testcase name="persistsTheme" classname="com.acme.app.SettingsTest" time="0.598"/>
+    <testcase name="syncsAcrossDevices" classname="com.acme.app.SettingsTest" time="0">
+      <skipped/>
+    </testcase>
+  </testsuite>
+</testsuites>

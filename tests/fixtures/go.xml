@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites tests="6" failures="2" errors="0" time="0.783">
+	<testsuite name="github.com/acme/widget/store" tests="3" failures="2" errors="0" id="0" hostname="ci-runner-4" time="0.512" timestamp="2026-08-18T09:14:02Z">
+		<properties>
+			<property name="go.version" value="go1.22.5"></property>
+		</properties>
+		<testcase name="TestStoreGet" classname="github.com/acme/widget/store" time="0.010"></testcase>
+		<testcase name="TestStorePutOverwrites" classname="github.com/acme/widget/store" time="0.021">
+			<failure message="Failed" type="">    store_test.go:41: expected 3 items in cache, got 2&#xA;</failure>
+		</testcase>
+		<testcase name="TestStoreConcurrentWrite" classname="github.com/acme/widget/store" time="0.481">
+			<failure message="Failed" type="">WARNING: DATA RACE&#xA;Write at 0x00c0000b4180 by goroutine 12:&#xA;  github.com/acme/widget/store.(*Store).Put()&#xA;      store.go:88 +0x64&#xA;    store_test.go:103: race detected during concurrent map write&#xA;</failure>
+		</testcase>
+	</testsuite>
+	<testsuite name="github.com/acme/widget/api" tests="3" failures="0" errors="0" id="1" hostname="ci-runner-4" time="0.271" timestamp="2026-08-18T09:14:03Z">
+		<properties>
+			<property name="go.version" value="go1.22.5"></property>
+		</properties>
+		<testcase name="TestHandlerHealthz" classname="github.com/acme/widget/api" time="0.002"></testcase>
+		<testcase name="TestHandlerCreateWidget" classname="github.com/acme/widget/api" time="0.263"></testcase>
+		<testcase name="TestHandlerRequiresAuth" classname="github.com/acme/widget/api" time="0.006">
+			<skipped message="skipped: -short in effect"></skipped>
+		</testcase>
+	</testsuite>
+</testsuites>

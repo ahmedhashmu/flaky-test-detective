@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="jest tests" tests="6" failures="3" errors="0" time="0.128">
+  <testsuite name="cart totals" errors="0" failures="3" skipped="1" timestamp="2026-08-18T08:42:42" time="0.115" tests="6">
+    <testcase classname="cart totals sums line items" name="cart totals sums line items" time="0.001">
+    </testcase>
+    <testcase classname="cart totals applies discount" name="cart totals applies discount" time="0.002">
+      <failure>Error: expect(received).toEqual(expected) // deep equality
+
+- Expected  - 1
++ Received  + 1
+
+  Object {
+-   &quot;total&quot;: 20,
++   &quot;total&quot;: 19,
+  }
+    at Object.toEqual (/private/tmp/ftd_jest_gen/sample.test.js:7:27)
+    at Promise.then.completed (/private/tmp/ftd_jest_gen/node_modules/jest-circus/build/utils.js:298:28)
+    at new Promise (&lt;anonymous&gt;)
+    at callAsyncCircusFn (/private/tmp/ftd_jest_gen/node_modules/jest-circus/build/utils.js:231:10)
+    at _callCircusTest (/private/tmp/ftd_jest_gen/node_modules/jest-circus/build/run.js:316:40)
+    at processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at _runTest (/private/tmp/ftd_jest_gen/node_modules/jest-circus/build/run.js:252:3)
+    at _runTestsForDescribeBlock (/private/tmp/ftd_jest_gen/node_modules/jest-circus/build/run.js:126:9)
+    at _runTestsForDescribeBlock (/private/tmp/ftd_jest_gen/node_modules/jest-circus/build/run.js:121:9)
+    at run (/private/tmp/ftd_jest_gen/node_modules/jest-circus/build/run.js:71:3)
+    at runAndTransformResultsToJestFormat (/private/tmp/ftd_jest_gen/node_modules/jest-circus/build/legacy-code-todo-rewrite/jestAdapterInit.js:122:21)
+    at jestAdapter (/private/tmp/ftd_jest_gen/node_modules/jest-circus/build/legacy-code-todo-rewrite/jestAdapter.js:79:19)
+    at runTestInternal (/private/tmp/ftd_jest_gen/node_modules/jest-runner/build/runTest.js:367:16)
+    at runTest (/private/tmp/ftd_jest_gen/node_modules/jest-runner/build/runTest.js:444:34)</failure>
+    </testcase>
+    <testcase classname="cart totals when the pricing service is unreachable falls back to cached prices" name="cart totals when the pricing service is unreachable falls back to cached prices" time="0">
+      <failure>Error: connect ECONNREFUSED 127.0.0.1:8080
+    at Object.&lt;anonymous&gt; (/private/tmp/ftd_jest_gen/sample.test.js:12:13)
+    at Promise.then.completed (/private/tmp/ftd_jest_gen/node_modules/jest-circus/build/utils.js:298:28)
+    at new Promise (&lt;anonymous&gt;)
+    at callAsyncCircusFn (/private/tmp/ftd_jest_gen/node_modules/jest-circus/build/utils.js:231:10)
+    at _callCircusTest (/private/tmp/ftd_jest_gen/node_modules/jest-circus/build/run.js:316:40)
+    at processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at _runTest (/private/tmp/ftd_jest_gen/node_modules/jest-circus/build/run.js:252:3)
+    at _runTestsForDescribeBlock (/private/tmp/ftd_jest_gen/node_modules/jest-circus/build/run.js:126:9)
+    at _runTestsForDescribeBlock (/private/tmp/ftd_jest_gen/node_modules/jest-circus/build/run.js:121:9)
+    at _runTestsForDescribeBlock (/private/tmp/ftd_jest_gen/node_modules/jest-circus/build/run.js:121:9)
+    at run (/private/tmp/ftd_jest_gen/node_modules/jest-circus/build/run.js:71:3)
+    at runAndTransformResultsToJestFormat (/private/tmp/ftd_jest_gen/node_modules/jest-circus/build/legacy-code-todo-rewrite/jestAdapterInit.js:122:21)
+    at jestAdapter (/private/tmp/ftd_jest_gen/node_modules/jest-circus/build/legacy-code-todo-rewrite/jestAdapter.js:79:19)
+    at runTestInternal (/private/tmp/ftd_jest_gen/node_modules/jest-runner/build/runTest.js:367:16)
+    at runTest (/private/tmp/ftd_jest_gen/node_modules/jest-runner/build/runTest.js:444:34)</failure>
+    </testcase>
+    <testcase classname="checkout locks inventory" name="checkout locks inventory" time="0">
+    </testcase>
+    <testcase classname="checkout times out waiting for payment webhook" name="checkout times out waiting for payment webhook" time="0">
+      <failure>Error: Exceeded timeout of 5000 ms for a test
+    at Object.&lt;anonymous&gt; (/private/tmp/ftd_jest_gen/sample.test.js:23:11)
+    at Promise.then.completed (/private/tmp/ftd_jest_gen/node_modules/jest-circus/build/utils.js:298:28)
+    at new Promise (&lt;anonymous&gt;)
+    at callAsyncCircusFn (/private/tmp/ftd_jest_gen/node_modules/jest-circus/build/utils.js:231:10)
+    at _callCircusTest (/private/tmp/ftd_jest_gen/node_modules/jest-circus/build/run.js:316:40)
+    at processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at _runTest (/private/tmp/ftd_jest_gen/node_modules/jest-circus/build/run.js:252:3)
+    at _runTestsForDescribeBlock (/private/tmp/ftd_jest_gen/node_modules/jest-circus/build/run.js:126:9)
+    at _runTestsForDescribeBlock (/private/tmp/ftd_jest_gen/node_modules/jest-circus/build/run.js:121:9)
+    at run (/private/tmp/ftd_jest_gen/node_modules/jest-circus/build/run.js:71:3)
+    at runAndTransformResultsToJestFormat (/private/tmp/ftd_jest_gen/node_modules/jest-circus/build/legacy-code-todo-rewrite/jestAdapterInit.js:122:21)
+    at jestAdapter (/private/tmp/ftd_jest_gen/node_modules/jest-circus/build/legacy-code-todo-rewrite/jestAdapter.js:79:19)
+    at runTestInternal (/private/tmp/ftd_jest_gen/node_modules/jest-runner/build/runTest.js:367:16)
+    at runTest (/private/tmp/ftd_jest_gen/node_modules/jest-runner/build/runTest.js:444:34)</failure>
+    </testcase>
+    <testcase classname="checkout refunds on failure" name="checkout refunds on failure" time="0">
+      <skipped/>
+    </testcase>
+  </testsuite>
+</testsuites>

@@ -1,0 +1,730 @@
+"""Command-line interface.
+
+Argument handling, wiring, and exit codes. No analysis logic lives here.
+
+Exit codes are the contract with CI:
+
+    0  clean
+    1  flaky tests found, nothing else needing a human
+    2  regression or broken test found
+    3  usage or input error
+
+Commands that are primarily interactive (`analyze`, `report`) default to
+`--fail-on none` so that reading a report never fails a shell. `triage` is the CI
+gate and defaults to failing, because that is the entire point of it.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Annotated
+
+import typer
+from rich.console import Console
+
+from . import __version__, report as report_module, runner
+from .analysis import analyze as analyze_outcomes, analyze_one, triage as triage_run
+from .config import EXAMPLE_CONFIG, Config, load_config
+from .environment import detect
+from .ingest import ingest_paths, junit
+from .models import AnalysisReport, TestOutcome, Verdict
+from .quarantine import EXPORT_FORMATS, Quarantine, export as export_quarantine, recommend, verify
+from .report import console as console_report
+from .runner import HuntError
+from .storage import Storage, StorageError
+
+EXIT_OK = 0
+EXIT_FLAKY = 1
+EXIT_REGRESSION = 2
+EXIT_USAGE = 3
+
+app = typer.Typer(
+    name="flaky",
+    help=(
+        "Find and diagnose flaky tests from the JUnit XML your test runner already "
+        "produces.\n\n"
+        "Start with:  flaky hunt -- pytest tests/\n"
+        "Then:        flaky analyze"
+    ),
+    no_args_is_help=True,
+    add_completion=False,
+)
+
+quarantine_app = typer.Typer(
+    help="Manage quarantined flaky tests. Every entry expires and must be re-verified.",
+    no_args_is_help=True,
+)
+app.add_typer(quarantine_app, name="quarantine")
+
+stdout = Console()
+stderr = Console(stderr=True)
+
+DbOption = Annotated[
+    Path | None,
+    typer.Option("--db", help="Path to the history database. Default: .flaky.db"),
+]
+ConfigOption = Annotated[
+    Path | None,
+    typer.Option("--config", help="Path to .flaky.toml. Default: discovered upwards."),
+]
+SinceOption = Annotated[
+    str | None,
+    typer.Option("--since", help="Only consider runs on or after this ISO date."),
+]
+BranchOption = Annotated[
+    str | None, typer.Option("--branch", help="Only consider runs from this branch.")
+]
+LastOption = Annotated[
+    int | None, typer.Option("--last", help="Only consider the most recent N runs.")
+]
+ThresholdOption = Annotated[
+    float | None,
+    typer.Option("--threshold", help="Score above which a test is called flaky."),
+]
+FailOnOption = Annotated[
+    str,
+    typer.Option(
+        "--fail-on",
+        help="Exit non-zero on: none, flaky, or regression.",
+    ),
+]
+
+
+def main() -> None:
+    """Console script entry point."""
+    app()
+
+
+@app.command()
+def version() -> None:
+    """Print the version."""
+    stdout.print(f"flaky-test-detective {__version__}")
+
+
+@app.command()
+def init(
+    db: DbOption = None,
+    force: Annotated[bool, typer.Option("--force", help="Overwrite an existing config.")] = False,
+) -> None:
+    """Write a commented .flaky.toml and create the database."""
+    target = Path(".flaky.toml")
+    if target.exists() and not force:
+        stderr.print(f"{target} already exists. Use --force to overwrite.")
+        raise typer.Exit(EXIT_USAGE)
+
+    target.write_text(EXAMPLE_CONFIG, encoding="utf-8")
+    settings = _settings(None, db)
+
+    with Storage(settings.db_path):
+        pass
+
+    stdout.print(f"Wrote {target}")
+    stdout.print(f"Created {settings.db_path}")
+    stdout.print()
+    stdout.print("Next: run your suite a few times and feed the reports in.")
+    stdout.print("  flaky hunt -- pytest tests/", style="dim")
+    stdout.print("  flaky ingest 'reports/*.xml'", style="dim")
+
+
+@app.command()
+def ingest(
+    paths: Annotated[
+        list[str],
+        typer.Argument(help="JUnit XML files, directories, or glob patterns."),
+    ],
+    db: DbOption = None,
+    config: ConfigOption = None,
+    commit: Annotated[
+        str | None, typer.Option("--commit", help="Commit SHA. Overrides detection.")
+    ] = None,
+    branch: Annotated[
+        str | None, typer.Option("--branch", help="Branch name. Overrides detection.")
+    ] = None,
+    run_id: Annotated[
+        str | None, typer.Option("--run-id", help="CI run identifier. Overrides detection.")
+    ] = None,
+) -> None:
+    """Parse JUnit XML and add it to the history.
+
+    Re-ingesting the same report is safe: runs are identified by content, so
+    duplicates are skipped rather than double-counted.
+    """
+    settings = _settings(config, db)
+    env = detect().merged_with(commit_sha=commit, branch=branch, ci_run_id=run_id)
+
+    with _storage(settings) as store:
+        result = ingest_paths(
+            store,
+            paths,
+            commit_sha=env.commit_sha,
+            branch=env.branch,
+            ci_run_id=env.ci_run_id,
+        )
+
+    stdout.print(
+        f"Added {result.runs_added} runs ({result.results_added} results), "
+        f"skipped {result.runs_skipped} already present."
+    )
+    if env.commit_sha:
+        stdout.print(f"Commit {env.commit_sha[:12]} on {env.branch or 'unknown branch'}", style="dim")
+    else:
+        stdout.print(
+            "No commit SHA detected. Same-commit divergence, the strongest signal, "
+            "will be unavailable. Pass --commit to supply one.",
+            style="yellow",
+        )
+
+    for path, reason in result.failures:
+        stderr.print(f"skipped {path}: {reason}", style="yellow")
+
+    if result.runs_added == 0 and result.had_failures:
+        raise typer.Exit(EXIT_USAGE)
+
+
+@app.command(
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def hunt(
+    ctx: typer.Context,
+    iterations: Annotated[
+        int, typer.Option("-n", "--iterations", help="How many times to run the suite.")
+    ] = 10,
+    shuffle: Annotated[
+        bool,
+        typer.Option("--shuffle/--no-shuffle", help="Randomize test order between runs."),
+    ] = True,
+    report_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--report-path",
+            help="Where the runner writes JUnit XML. Required for unrecognized runners.",
+        ),
+    ] = None,
+    stop_after: Annotated[
+        int | None,
+        typer.Option("--stop-after", help="Stop once this many distinct flakes are found."),
+    ] = None,
+    seed: Annotated[
+        int | None, typer.Option("--seed", help="Base seed, so a hunt can be replayed.")
+    ] = None,
+    timeout: Annotated[
+        int, typer.Option("--timeout", help="Seconds allowed per iteration.")
+    ] = 1800,
+    db: DbOption = None,
+    config: ConfigOption = None,
+) -> None:
+    """Run a test command repeatedly and record what happens.
+
+    Put the command after a double dash:
+
+        flaky hunt -n 20 -- pytest tests/
+        flaky hunt -n 20 -- npx jest
+        flaky hunt --report-path target/surefire-reports -- mvn test
+    """
+    settings = _settings(config, db)
+    command = [arg for arg in ctx.args if arg != "--"]
+
+    try:
+        plan = runner.plan_hunt(
+            command,
+            iterations=iterations,
+            shuffle=shuffle,
+            report_path=report_path,
+            cwd=Path.cwd(),
+            base_seed=seed,
+            timeout=timeout,
+        )
+    except HuntError as exc:
+        stderr.print(str(exc))
+        raise typer.Exit(EXIT_USAGE) from exc
+
+    stdout.print(
+        f"Hunting with {plan.runner}: {iterations} iterations, "
+        f"order randomization {'on' if plan.shuffle_effective else 'off'}."
+    )
+    for note in plan.notes:
+        stderr.print(f"Note: {note}", style="yellow")
+
+    def progress(result: runner.IterationResult) -> None:
+        if result.run is not None:
+            stdout.print(
+                f"  {result.iteration:>3}/{iterations}  {result.duration:>5.1f}s  "
+                f"{result.run.failed:>3} failed  "
+                f"{len(result.new_flakes)} flaky so far",
+                style="dim",
+            )
+        else:
+            stderr.print(f"  {result.iteration:>3}/{iterations}  {result.error}", style="yellow")
+
+    env = detect()
+    with _storage(settings) as store:
+        summary = runner.run_hunt(
+            plan,
+            store,
+            settings,
+            environment=env,
+            progress=progress,
+            stop_after_flakes=stop_after,
+        )
+
+    stdout.print()
+    if summary.stopped_early:
+        stdout.print(f"Stopped early: {stop_after} flakes found.", style="yellow")
+
+    stdout.print(
+        f"Collected {summary.collected} of {len(summary.iterations)} iterations "
+        f"in {summary.total_duration:.1f}s."
+    )
+
+    if summary.failed_to_collect:
+        stderr.print(
+            f"{len(summary.failed_to_collect)} iterations produced no usable report. "
+            "The first error was:",
+            style="yellow",
+        )
+        stderr.print(f"  {summary.failed_to_collect[0].error}", style="yellow")
+
+    if summary.collected == 0:
+        raise typer.Exit(EXIT_USAGE)
+
+    stdout.print(f"Found {len(summary.flaky_test_ids)} flaky tests. Run `flaky analyze` for detail.")
+
+
+@app.command()
+def analyze(
+    db: DbOption = None,
+    config: ConfigOption = None,
+    since: SinceOption = None,
+    branch: BranchOption = None,
+    last: LastOption = None,
+    threshold: ThresholdOption = None,
+    limit: Annotated[int, typer.Option("--limit", help="How many tests to show.")] = 25,
+    show_stable: Annotated[
+        bool, typer.Option("--show-stable", help="Include tests scored 0.")
+    ] = False,
+    clusters: Annotated[
+        bool, typer.Option("--clusters/--no-clusters", help="Show shared failure signatures.")
+    ] = True,
+    fail_on: FailOnOption = "none",
+) -> None:
+    """Rank tests by flakiness and explain the worst offenders."""
+    settings = _settings(config, db, threshold)
+    result = _analyze(settings, since=since, branch=branch, last=last)
+
+    console_report.render_report(
+        result, stdout, limit=limit, show_clusters=clusters, show_stable=show_stable
+    )
+    raise typer.Exit(_exit_code(result, fail_on))
+
+
+@app.command(name="report")
+def report_command(
+    fmt: Annotated[
+        str, typer.Option("--format", "-f", help="md, json, or html.")
+    ] = "md",
+    output: Annotated[
+        Path | None, typer.Option("--output", "-o", help="Write here instead of stdout.")
+    ] = None,
+    db: DbOption = None,
+    config: ConfigOption = None,
+    since: SinceOption = None,
+    branch: BranchOption = None,
+    last: LastOption = None,
+    threshold: ThresholdOption = None,
+    fail_on: FailOnOption = "none",
+) -> None:
+    """Render the report as Markdown, JSON, or a standalone HTML page."""
+    settings = _settings(config, db, threshold)
+    result = _analyze(settings, since=since, branch=branch, last=last)
+
+    try:
+        rendered = report_module.render(result, fmt)
+    except ValueError as exc:
+        stderr.print(str(exc))
+        raise typer.Exit(EXIT_USAGE) from exc
+
+    if output:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(rendered, encoding="utf-8")
+        stderr.print(f"Wrote {output}", style="dim")
+    else:
+        stdout.file.write(rendered)
+
+    raise typer.Exit(_exit_code(result, fail_on))
+
+
+@app.command()
+def triage(
+    report_file: Annotated[
+        Path, typer.Argument(help="The JUnit XML for the run you want triaged.")
+    ],
+    db: DbOption = None,
+    config: ConfigOption = None,
+    fmt: Annotated[
+        str, typer.Option("--format", "-f", help="console, md, or json.")
+    ] = "console",
+    store_run: Annotated[
+        bool,
+        typer.Option("--ingest/--no-ingest", help="Also add this run to the history."),
+    ] = False,
+    fail_on: FailOnOption = "regression",
+) -> None:
+    """Answer the red-build question: is this new breakage, or known flakes?
+
+    History is evaluated with this run excluded, so a first-time failure cannot use
+    the evidence of itself to look flaky.
+    """
+    settings = _settings(config, db)
+
+    try:
+        run = junit.parse_file(report_file)
+    except junit.ParseError as exc:
+        stderr.print(f"Could not read {report_file}: {exc}")
+        raise typer.Exit(EXIT_USAGE) from exc
+
+    with _storage(settings) as store:
+        history = [o for o in store.outcomes() if o.run_uid != run.run_uid]
+        if store_run:
+            store.add_run(run)
+
+    baseline = analyze_outcomes(history, settings)
+    result = triage_run(list(run.outcomes), baseline, source=str(report_file))
+
+    if fmt == "console":
+        console_report.render_triage(result, stdout)
+    else:
+        try:
+            stdout.file.write(report_module.render_triage(result, fmt))
+        except ValueError as exc:
+            stderr.print(str(exc))
+            raise typer.Exit(EXIT_USAGE) from exc
+
+    if fail_on == "none":
+        raise typer.Exit(EXIT_OK)
+    if result.regressions:
+        raise typer.Exit(EXIT_REGRESSION)
+    if result.new_failures:
+        raise typer.Exit(EXIT_REGRESSION if fail_on == "regression" else EXIT_FLAKY)
+    raise typer.Exit(EXIT_OK)
+
+
+@app.command()
+def history(
+    test_id: Annotated[str, typer.Argument(help="Full test id, or any part of one.")],
+    db: DbOption = None,
+    config: ConfigOption = None,
+    limit: Annotated[int, typer.Option("--limit", help="How many runs to show.")] = 40,
+) -> None:
+    """Show one test's timeline, run by run."""
+    settings = _settings(config, db)
+
+    with _storage(settings) as store:
+        matches = store.find_test_ids(test_id)
+        if not matches:
+            stderr.print(f"No test matching {test_id!r}. Try `flaky analyze` to see what exists.")
+            raise typer.Exit(EXIT_USAGE)
+        if len(matches) > 1 and test_id not in matches:
+            stderr.print(f"{len(matches)} tests match {test_id!r}:")
+            for candidate in matches[:20]:
+                stderr.print(f"  {candidate}")
+            raise typer.Exit(EXIT_USAGE)
+
+        resolved = test_id if test_id in matches else matches[0]
+        outcomes = store.outcomes_for_test(resolved)
+        all_outcomes = store.outcomes()
+
+    from .analysis.ordering import build_predecessor_index
+
+    analysis = analyze_one(
+        resolved, outcomes, settings, predecessors=build_predecessor_index(all_outcomes)
+    )
+    timeline = [
+        (o.started_at or "", str(o.status), o.message) for o in outcomes[-limit:]
+    ]
+    console_report.render_history(resolved, analysis, timeline, stdout)
+
+
+@app.command()
+def stats(db: DbOption = None, config: ConfigOption = None) -> None:
+    """Summarize what is in the database."""
+    settings = _settings(config, db)
+    with _storage(settings) as store:
+        console_report.render_stats(store.stats(), stdout)
+
+
+@quarantine_app.command("list")
+def quarantine_list(db: DbOption = None, config: ConfigOption = None) -> None:
+    """Show current quarantine entries and when they expire."""
+    settings = _settings(config, db)
+    store = Quarantine(settings.quarantine_path)
+
+    if not len(store):
+        stdout.print("Nothing quarantined.")
+        return
+
+    for entry in store.entries:
+        state = "EXPIRED" if entry.is_expired() else f"{entry.days_remaining()}d left"
+        style = "yellow" if entry.is_expired() else "dim"
+        stdout.print(f"{entry.score:.2f}  {entry.test_id}")
+        stdout.print(f"      {entry.reason}  |  {state}", style=style)
+
+    stdout.print()
+    stdout.print(
+        f"{len(store.active())} active, {len(store.expired())} expired. "
+        "Run `flaky quarantine verify` to re-check the expired ones.",
+        style="dim",
+    )
+
+
+@quarantine_app.command("recommend")
+def quarantine_recommend(
+    db: DbOption = None,
+    config: ConfigOption = None,
+    since: SinceOption = None,
+    branch: BranchOption = None,
+    apply: Annotated[
+        bool, typer.Option("--apply", help="Add the recommendations to the quarantine list.")
+    ] = False,
+    days: Annotated[
+        int | None, typer.Option("--days", help="Days until the entries expire.")
+    ] = None,
+) -> None:
+    """List tests flaky enough to justify removing them from the suite.
+
+    Regressions and broken tests are never recommended. Quarantining a real failure
+    is how bugs reach production.
+    """
+    settings = _settings(config, db)
+    result = _analyze(settings, since=since, branch=branch, last=None)
+    candidates = recommend(result, settings)
+
+    if not candidates:
+        stdout.print(
+            f"Nothing scores above the quarantine threshold of "
+            f"{settings.quarantine_threshold:.2f}."
+        )
+        return
+
+    for test in candidates:
+        cause = test.cause.cause if test.cause else "unknown"
+        stdout.print(f"{test.score:.2f}  {test.test_id}")
+        stdout.print(
+            f"      {cause}, failed {test.failures} of {test.runs} runs", style="dim"
+        )
+
+    if not apply:
+        stdout.print()
+        stdout.print("Re-run with --apply to quarantine these.", style="dim")
+        return
+
+    store = Quarantine(settings.quarantine_path)
+    expiry_days = days if days is not None else settings.quarantine_days
+    for test in candidates:
+        cause = test.cause.cause if test.cause else "unknown"
+        store.add(
+            test.test_id,
+            reason=f"{cause}, score {test.score:.2f}, failed {test.failures}/{test.runs} runs",
+            score=test.score,
+            days=expiry_days,
+        )
+    store.save()
+    stdout.print()
+    stdout.print(f"Quarantined {len(candidates)} tests for {expiry_days} days.")
+    stdout.print(f"Wrote {settings.quarantine_path}", style="dim")
+
+
+@quarantine_app.command("add")
+def quarantine_add(
+    test_id: Annotated[str, typer.Argument(help="Exact test id to quarantine.")],
+    reason: Annotated[str, typer.Option("--reason", help="Why it is being quarantined.")] = "manual",
+    days: Annotated[int | None, typer.Option("--days", help="Days until expiry.")] = None,
+    db: DbOption = None,
+    config: ConfigOption = None,
+) -> None:
+    """Quarantine one test by hand."""
+    settings = _settings(config, db)
+    store = Quarantine(settings.quarantine_path)
+    entry = store.add(
+        test_id, reason=reason, days=days if days is not None else settings.quarantine_days
+    )
+    store.save()
+    stdout.print(f"Quarantined {test_id} until {entry.expires_at[:10]}.")
+
+
+@quarantine_app.command("remove")
+def quarantine_remove(
+    test_id: Annotated[str, typer.Argument(help="Exact test id to release.")],
+    db: DbOption = None,
+    config: ConfigOption = None,
+) -> None:
+    """Release a test from quarantine."""
+    settings = _settings(config, db)
+    store = Quarantine(settings.quarantine_path)
+    if not store.remove(test_id):
+        stderr.print(f"{test_id} is not quarantined.")
+        raise typer.Exit(EXIT_USAGE)
+    store.save()
+    stdout.print(f"Released {test_id}.")
+
+
+@quarantine_app.command("export")
+def quarantine_export(
+    fmt: Annotated[
+        str,
+        typer.Option("--format", "-f", help=f"One of: {', '.join(EXPORT_FORMATS)}"),
+    ] = "list",
+    output: Annotated[
+        Path | None, typer.Option("--output", "-o", help="Write here instead of stdout.")
+    ] = None,
+    db: DbOption = None,
+    config: ConfigOption = None,
+) -> None:
+    """Emit the quarantine list in a form your runner accepts.
+
+    `pytest-conftest` is the one to prefer in CI: it skips the tests with a visible
+    reason rather than removing them silently.
+    """
+    settings = _settings(config, db)
+    store = Quarantine(settings.quarantine_path)
+
+    try:
+        rendered = export_quarantine(store.entries, fmt)
+    except ValueError as exc:
+        stderr.print(str(exc))
+        raise typer.Exit(EXIT_USAGE) from exc
+
+    if output:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(rendered, encoding="utf-8")
+        stderr.print(f"Wrote {output}", style="dim")
+    else:
+        stdout.file.write(rendered)
+
+
+@quarantine_app.command("verify")
+def quarantine_verify(
+    db: DbOption = None,
+    config: ConfigOption = None,
+    since: SinceOption = None,
+    release: Annotated[
+        bool, typer.Option("--release", help="Remove entries that now look stable.")
+    ] = False,
+) -> None:
+    """Re-check expired entries against current history."""
+    settings = _settings(config, db)
+    store = Quarantine(settings.quarantine_path)
+
+    if not store.expired():
+        stdout.print(f"No expired entries. {len(store.active())} still active.")
+        return
+
+    result = _analyze(settings, since=since, branch=None, last=None)
+    outcome = verify(store, result, config=settings)
+
+    if outcome.releasable:
+        stdout.print("Now stable, safe to release:", style="green")
+        for entry in outcome.releasable:
+            stdout.print(f"  {entry.test_id}")
+
+    if outcome.still_flaky:
+        stdout.print()
+        stdout.print("Still flaky, quarantine renewed:", style="yellow")
+        for entry in outcome.still_flaky:
+            stdout.print(f"  {entry.test_id}")
+
+    if outcome.unknown:
+        stdout.print()
+        stdout.print(
+            "Expired with no recent runs. A quarantined test stops producing "
+            "evidence, so it can never prove itself stable. Release these and watch:",
+            style="yellow",
+        )
+        for entry in outcome.unknown:
+            stdout.print(f"  {entry.test_id}")
+
+    if release and outcome.releasable:
+        for entry in outcome.releasable:
+            store.remove(entry.test_id)
+        for entry in outcome.still_flaky:
+            store.renew(entry.test_id, days=settings.quarantine_days)
+        store.save()
+        stdout.print()
+        stdout.print(f"Released {len(outcome.releasable)}, renewed {len(outcome.still_flaky)}.")
+    elif outcome.releasable:
+        stdout.print()
+        stdout.print("Re-run with --release to apply.", style="dim")
+
+
+# -- helpers ------------------------------------------------------------------
+
+
+def _settings(config: Path | None, db: Path | None, threshold: float | None = None) -> Config:
+    try:
+        settings = load_config(config)
+    except ValueError as exc:
+        stderr.print(str(exc))
+        raise typer.Exit(EXIT_USAGE) from exc
+
+    return settings.with_overrides(
+        db_path=db.expanduser().resolve() if db else None,
+        flake_threshold=threshold,
+    )
+
+
+def _storage(settings: Config) -> Storage:
+    try:
+        return Storage(settings.db_path)
+    except StorageError as exc:
+        stderr.print(str(exc))
+        raise typer.Exit(EXIT_USAGE) from exc
+
+
+def _analyze(
+    settings: Config, *, since: str | None, branch: str | None, last: int | None
+) -> AnalysisReport:
+    with _storage(settings) as store:
+        if store.run_count() == 0:
+            stderr.print(
+                f"No runs in {settings.db_path}.\n"
+                "Record some first:\n"
+                "  flaky hunt -- pytest tests/\n"
+                "  flaky ingest 'reports/*.xml'"
+            )
+            raise typer.Exit(EXIT_USAGE)
+
+        outcomes: list[TestOutcome] = store.outcomes(
+            since=since, branch=branch, limit_runs=last
+        )
+
+    if not outcomes:
+        stderr.print("No runs matched those filters.")
+        raise typer.Exit(EXIT_USAGE)
+
+    return analyze_outcomes(outcomes, settings)
+
+
+def _exit_code(result: AnalysisReport, fail_on: str) -> int:
+    """Translate an analysis into a process exit code.
+
+    Regression outranks flaky: a real break is the more urgent thing to report, and
+    conflating the two is what teaches people to ignore red builds.
+    """
+    if fail_on not in ("none", "flaky", "regression"):
+        stderr.print(f"--fail-on must be none, flaky, or regression, not {fail_on!r}")
+        return EXIT_USAGE
+
+    if fail_on == "none":
+        return EXIT_OK
+
+    has_break = any(
+        t.verdict in (Verdict.REGRESSION, Verdict.BROKEN) for t in result.tests
+    )
+    if has_break:
+        return EXIT_REGRESSION
+    if fail_on == "flaky" and result.flaky:
+        return EXIT_FLAKY
+    return EXIT_OK
+
+
+if __name__ == "__main__":
+    main()
