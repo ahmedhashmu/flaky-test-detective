@@ -16,6 +16,7 @@ gate and defaults to failing, because that is the entire point of it.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Annotated
 
@@ -62,6 +63,26 @@ app.add_typer(quarantine_app, name="quarantine")
 
 stdout = Console()
 stderr = Console(stderr=True)
+
+DEFAULT_HEIGHT = 50
+"""Rich only honours an explicit width when a height is set alongside it."""
+
+
+@app.callback()
+def _configure() -> None:
+    """Runs before every command.
+
+    Honours COLUMNS so that output width can be pinned. Rich otherwise measures the
+    attached terminal, which makes report width depend on whoever happened to run
+    the command -- unhelpful for CI artifacts, and a reliable way to write a test
+    that passes in one shell and fails in another.
+    """
+    width = os.environ.get("COLUMNS", "")
+    if width.isdigit() and int(width) > 0:
+        for console in (stdout, stderr):
+            console.width = int(width)
+            console.height = DEFAULT_HEIGHT
+
 
 DbOption = Annotated[
     Path | None,

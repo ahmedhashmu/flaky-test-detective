@@ -11,6 +11,20 @@ from flaky_detective.models import Status, TestOutcome
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
+@pytest.fixture(autouse=True)
+def _fixed_terminal_width(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the terminal width for every test.
+
+    Rich wraps to the ambient terminal, so any assertion looking for a phrase in
+    CLI output silently depends on the width of whatever shell happened to run it.
+    That is exactly how a test becomes flaky, and it caught this suite out: an
+    assertion for "DOCTYPE or ENTITY" passed in a wide terminal and failed in a
+    narrower one, because rich had broken the line between "or" and "ENTITY".
+    """
+    monkeypatch.setenv("COLUMNS", "200")
+    monkeypatch.setenv("LINES", "50")
+
+
 @pytest.fixture
 def fixtures() -> Path:
     return FIXTURES
