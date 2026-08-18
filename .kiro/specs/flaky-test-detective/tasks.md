@@ -140,7 +140,7 @@ modules come before the CLI so they can be tested as pure functions.
 
 All 20 tasks landed. Final state:
 
-- 426 tests, 89% coverage, running in about 5 seconds
+- 447 tests, 89% coverage, running in about 5 seconds
 - `ruff check`, `ruff format --check` and `mypy` all clean
 - Verified from a clean clone: 39 checks covering every command documented in the
   README, all passing
@@ -184,3 +184,29 @@ Several CLI assertions searched for a phrase in rich-formatted output, and rich
 wraps to the attached terminal, so `"DOCTYPE or ENTITY"` passed in a wide shell and
 failed in a narrow one. Fixed by honouring `COLUMNS` in the CLI and pinning the
 width in tests. Verified at four widths and with the variable unset.
+
+### Pre-submission audit
+
+A review pass before submission found three real defects, all in packaging and
+documentation rather than in the tool:
+
+1. **The README's pip instructions did not work.** Dev dependencies were declared
+   only in `[dependency-groups]` (PEP 735), which pip could not install before
+   version 25.1, so `pip install -e ".[dev]"` installed the package and silently
+   skipped pytest, ruff and mypy — making the documented test instructions fail for
+   anyone not using uv. Fixed by declaring a `dev` extra as the single source of
+   truth and having the dependency group reference it, so both installers work from
+   one list of pins. Verified in a fresh venv with plain pip: 447 tests pass.
+2. **`[project.urls]` pointed at a repository that returns 404.** Corrected to
+   `ahmedhashmu`.
+3. **All three hook files had `timeout` nested inside `action`.** The documented v1
+   schema puts it at hook level, so the value was being ignored. This is the kind
+   of defect that produces no error at all — a hook with a misplaced field simply
+   never applies it. Corrected against the schema at https://kiro.dev/docs/hooks.md
+   and now covered by `tests/test_architecture.py::TestKiroHooks`, which validates
+   the version, triggers, field placement and matcher regexes, and asserts the
+   matchers actually select the intended files.
+
+Python 3.14 was added to the CI matrix and classifiers after confirming the suite
+passes on it, a CI badge was added, and the testing instructions now note that the
+`/tmp` paths assume macOS or Linux.

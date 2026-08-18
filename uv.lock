@@ -216,7 +216,7 @@ dependencies = [
     { name = "typer" },
 ]
 
-[package.dev-dependencies]
+[package.optional-dependencies]
 dev = [
     { name = "mypy" },
     { name = "pytest" },
@@ -225,20 +225,25 @@ dev = [
     { name = "ruff" },
 ]
 
-[package.metadata]
-requires-dist = [
-    { name = "rich", specifier = ">=13.7.0" },
-    { name = "typer", specifier = ">=0.12.0" },
+[package.dev-dependencies]
+dev = [
+    { name = "flaky-test-detective", extra = ["dev"] },
 ]
 
-[package.metadata.requires-dev]
-dev = [
-    { name = "mypy", specifier = ">=1.11.0" },
-    { name = "pytest", specifier = ">=8.0.0" },
-    { name = "pytest-cov", specifier = ">=5.0.0" },
-    { name = "pytest-randomly", specifier = ">=3.15.0" },
-    { name = "ruff", specifier = ">=0.6.0" },
+[package.metadata]
+requires-dist = [
+    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
+    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0.0" },
+    { name = "pytest-randomly", marker = "extra == 'dev'", specifier = ">=3.15.0" },
+    { name = "rich", specifier = ">=13.7.0" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6.0" },
+    { name = "typer", specifier = ">=0.12.0" },
 ]
+provides-extras = ["dev"]
+
+[package.metadata.requires-dev]
+dev = [{ name = "flaky-test-detective", extras = ["dev"] }]
 
 [[package]]
 name = "iniconfig"

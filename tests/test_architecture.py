@@ -14,6 +14,8 @@ with `runner` beside `ingest` as a producer that feeds the same pipeline.
 from __future__ import annotations
 
 import ast
+import json
+import re
 import sys
 from pathlib import Path
 from typing import ClassVar
@@ -225,3 +227,189 @@ class TestDocumentation:
                 if stripped.startswith("#") and ("TODO" in stripped or "FIXME" in stripped):
                     offenders.append(f"{module.name}:{number}")
         assert not offenders, f"TODO/FIXME left in committed code: {offenders}"
+
+
+class TestKiroHooks:
+    """Validate .kiro/hooks/*.json against the documented v1 hook schema.
+
+    A hook with a misplaced field does not raise anything; it simply never fires,
+    and a hook that never fires is indistinguishable from one that was never
+    written. These files are part of the project's record of how it was built, so
+    they are checked rather than assumed.
+
+    The schema was confirmed against https://kiro.dev/docs/hooks.md. `timeout` is a
+    hook-level field, not part of `action` -- which is where it originally was in
+    all three of these files.
+    """
+
+    HOOKS_DIR: ClassVar[Path] = Path(__file__).resolve().parent.parent / ".kiro" / "hooks"
+
+    VALID_TRIGGERS: ClassVar[frozenset[str]] = frozenset(
+        {
+            "SessionStart",
+            "Stop",
+            "UserPromptSubmit",
+            "PreTaskExec",
+            "PostTaskExec",
+            "PreToolUse",
+            "PostToolUse",
+            "PostFileCreate",
+            "PostFileSave",
+            "PostFileDelete",
+        }
+    )
+    HOOK_FIELDS: ClassVar[frozenset[str]] = frozenset(
+        {"name", "description", "trigger", "matcher", "timeout", "action", "enabled", "confirm"}
+    )
+    ACTION_FIELDS: ClassVar[frozenset[str]] = frozenset({"type", "command", "prompt"})
+
+    # Triggers whose matcher is documented as ignored. Setting one would imply a
+    # filter that does not exist.
+    MATCHERLESS: ClassVar[frozenset[str]] = frozenset(
+        {"SessionStart", "Stop", "PreTaskExec", "PostTaskExec"}
+    )
+
+    def hook_files(self) -> list[Path]:
+        return sorted(self.HOOKS_DIR.glob("*.json"))
+
+    def test_hooks_exist(self) -> None:
+        assert self.hook_files(), "no hook files found"
+
+    def test_all_three_behaviours_are_present(self) -> None:
+        names = {
+            hook["name"]
+            for path in self.hook_files()
+            for hook in json.loads(path.read_text(encoding="utf-8"))["hooks"]
+        }
+        assert names == {
+            "Lint and format check on save",
+            "Architecture guard",
+            "Test after spec task",
+        }
+
+    def test_files_are_valid_json(self) -> None:
+        for path in self.hook_files():
+            json.loads(path.read_text(encoding="utf-8"))
+
+    def test_schema_version(self) -> None:
+        for path in self.hook_files():
+            data = json.loads(path.read_text(encoding="utf-8"))
+            assert data.get("version") == "v1", path.name
+            assert set(data) == {"version", "hooks"}, path.name
+            assert isinstance(data["hooks"], list) and data["hooks"], path.name
+
+    def test_required_fields_and_valid_triggers(self) -> None:
+        for path in self.hook_files():
+            for hook in json.loads(path.read_text(encoding="utf-8"))["hooks"]:
+                assert not set(hook) - self.HOOK_FIELDS, f"{path.name}: unknown fields"
+                for required in ("name", "trigger", "action"):
+                    assert required in hook, f"{path.name}: missing {required}"
+                assert hook["trigger"] in self.VALID_TRIGGERS, f"{path.name}: {hook['trigger']}"
+
+    def test_timeout_is_a_hook_level_field(self) -> None:
+        """Regression test. `timeout` inside `action` is silently ignored."""
+        for path in self.hook_files():
+            for hook in json.loads(path.read_text(encoding="utf-8"))["hooks"]:
+                action = hook["action"]
+                assert "timeout" not in action, f"{path.name}: timeout nested inside action"
+                assert not set(action) - self.ACTION_FIELDS, f"{path.name}: unknown action fields"
+
+    def test_actions_carry_what_their_type_requires(self) -> None:
+        for path in self.hook_files():
+            for hook in json.loads(path.read_text(encoding="utf-8"))["hooks"]:
+                action = hook["action"]
+                assert action["type"] in {"command", "agent"}, path.name
+                if action["type"] == "command":
+                    assert action.get("command"), f"{path.name}: no command"
+                else:
+                    assert action.get("prompt"), f"{path.name}: no prompt"
+
+    def test_matchers_are_valid_regexes(self) -> None:
+        for path in self.hook_files():
+            for hook in json.loads(path.read_text(encoding="utf-8"))["hooks"]:
+                if "matcher" in hook:
+                    re.compile(hook["matcher"])
+
+    def test_no_matcher_on_triggers_that_ignore_it(self) -> None:
+        for path in self.hook_files():
+            for hook in json.loads(path.read_text(encoding="utf-8"))["hooks"]:
+                if hook["trigger"] in self.MATCHERLESS:
+                    assert "matcher" not in hook, f"{path.name}: {hook['trigger']} ignores matcher"
+
+    @pytest.mark.parametrize(
+        ("hook_file", "path", "should_match"),
+        [
+            ("lint-on-save", "src/flaky_detective/cli.py", True),
+            ("lint-on-save", "tests/test_cli.py", True),
+            ("lint-on-save", "README.md", False),
+            ("architecture-guard", "src/flaky_detective/analysis/flakiness.py", True),
+            ("architecture-guard", "src/flaky_detective/report/console.py", True),
+            ("architecture-guard", "src/flaky_detective/storage.py", False),
+            ("architecture-guard", "tests/test_flakiness.py", False),
+        ],
+    )
+    def test_matchers_select_the_intended_files(
+        self, hook_file: str, path: str, should_match: bool
+    ) -> None:
+        hook = json.loads((self.HOOKS_DIR / f"{hook_file}.json").read_text(encoding="utf-8"))
+        matcher = hook["hooks"][0]["matcher"]
+        assert (re.search(matcher, path) is not None) is should_match
+
+
+class TestPackagingMetadata:
+    """Guard the install paths the README documents.
+
+    Dev dependencies live in two places for a reason: `uv sync` reads
+    `[dependency-groups]` (PEP 735), while plain `pip install -e ".[dev]"` reads
+    `[project.optional-dependencies]`. pip could not install dependency groups at
+    all before 25.1, and the README's test instructions have to work with the pip
+    people already have.
+
+    Two places is one place too many to maintain by hand, so the group references
+    the extra rather than repeating it, and that arrangement is asserted here.
+    """
+
+    @staticmethod
+    def pyproject() -> dict:
+        import tomllib
+
+        path = Path(__file__).resolve().parent.parent / "pyproject.toml"
+        with path.open("rb") as handle:
+            return tomllib.load(handle)
+
+    def test_dev_extra_exists(self) -> None:
+        """`pip install -e ".[dev]"` must actually provide the dev tools."""
+        extras = self.pyproject()["project"]["optional-dependencies"]
+        assert "dev" in extras
+        names = " ".join(extras["dev"])
+        for tool in ("pytest", "ruff", "mypy", "pytest-randomly"):
+            assert tool in names, f"{tool} missing from the dev extra"
+
+    def test_dev_group_references_the_extra_rather_than_duplicating_it(self) -> None:
+        """One list of pins, so the two install paths cannot drift apart."""
+        group = self.pyproject()["dependency-groups"]["dev"]
+        assert group == ["flaky-test-detective[dev]"], (
+            "the dev dependency group should reference the dev extra, not repeat it"
+        )
+
+    def test_runtime_dependencies_stay_at_two(self) -> None:
+        deps = self.pyproject()["project"]["dependencies"]
+        roots = sorted(re.split(r"[<>=!~\[]", d)[0].strip() for d in deps)
+        assert roots == ["rich", "typer"], f"runtime dependencies drifted: {roots}"
+
+    def test_supported_python_versions_are_declared(self) -> None:
+        project = self.pyproject()["project"]
+        assert project["requires-python"] == ">=3.11"
+        classifiers = " ".join(project["classifiers"])
+        for version in ("3.11", "3.12", "3.13", "3.14"):
+            assert version in classifiers, f"Python {version} missing from classifiers"
+
+    def test_ci_matrix_covers_every_declared_version(self) -> None:
+        """A version claimed in the classifiers but untested is a claim, not a fact."""
+        workflow = (
+            Path(__file__).resolve().parent.parent / ".github" / "workflows" / "ci.yml"
+        ).read_text(encoding="utf-8")
+        match = re.search(r"python:\s*\[([^\]]+)\]", workflow)
+        assert match, "could not find the python matrix in ci.yml"
+        tested = {v.strip().strip('"').strip("'") for v in match.group(1).split(",")}
+        assert tested == {"3.11", "3.12", "3.13", "3.14"}, f"matrix is {sorted(tested)}"

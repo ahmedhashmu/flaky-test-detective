@@ -6,10 +6,10 @@
       "trigger": "PostFileSave",
       "description": "Enforces the dependency rules from .kiro/steering/structure.md when analysis or report modules change. analysis/ must never import sqlite3 or storage, and report/ must never compute a derived value. Both rules are easy to break under time pressure and expensive to unpick later, so they are checked the moment those directories are touched.",
       "matcher": "src/flaky_detective/(analysis|report)/.*\\.py$",
+      "timeout": 120,
       "action": {
         "type": "command",
-        "command": "uv run pytest tests/test_architecture.py -q",
-        "timeout": 120
+        "command": "uv run pytest tests/test_architecture.py -q"
       }
     }
   ]

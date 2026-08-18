@@ -6,10 +6,10 @@
       "trigger": "PostFileSave",
       "description": "Runs ruff lint and format checks whenever a Python file is saved. Fast enough (well under a second) to run on every save, and catches the import-ordering and line-length drift that would otherwise only surface in CI.",
       "matcher": "\\.py$",
+      "timeout": 60,
       "action": {
         "type": "command",
-        "command": "uv run ruff check . && uv run ruff format --check .",
-        "timeout": 60
+        "command": "uv run ruff check . && uv run ruff format --check ."
       }
     }
   ]

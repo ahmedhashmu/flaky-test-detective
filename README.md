@@ -1,5 +1,7 @@
 # Flaky Test Detective
 
+[![CI](https://github.com/ahmedhashmu/flaky-test-detective/actions/workflows/ci.yml/badge.svg)](https://github.com/ahmedhashmu/flaky-test-detective/actions/workflows/ci.yml)
+
 Find and diagnose flaky tests from the JUnit XML your test runner already produces.
 
 ```
@@ -54,14 +56,25 @@ anything about them.
 
 ## Install
 
-Requires Python 3.11 or newer. No services, no accounts, no network access, no
-credentials.
+Requires Python 3.11 or newer; 3.11, 3.12, 3.13 and 3.14 are tested in CI. No
+services, no accounts, no network access, no credentials.
 
 ```sh
 git clone https://github.com/ahmedhashmu/flaky-test-detective
 cd flaky-test-detective
-uv sync                     # or: pip install -e ".[dev]"
+
+uv sync                        # with uv
 uv run flaky --help
+```
+
+Or with plain pip. The dev tools are declared as a `dev` extra as well as a
+dependency group, so both installers work:
+
+```sh
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"        # tool plus pytest, ruff and mypy
+pip install -e .               # just the tool, if you only want to run it
+flaky --help
 ```
 
 To use it against your own project:
@@ -473,13 +486,19 @@ same as a score backed by proof.
 No credentials, no API keys, no network access, no paid services. Everything runs
 locally.
 
+Verified on macOS and Linux. On Windows, run these under WSL, or substitute any
+writable directory for `/tmp`.
+
 ```sh
 git clone https://github.com/ahmedhashmu/flaky-test-detective
 cd flaky-test-detective
 uv sync
 ```
 
-**1. Run the test suite** — 426 tests, about 5 seconds on a laptop:
+Substitute `pip install -e ".[dev]"` for `uv sync` and drop the `uv run` prefixes
+if you would rather use pip.
+
+**1. Run the test suite** — 447 tests, about 5 seconds on a laptop:
 
 ```sh
 uv run pytest
