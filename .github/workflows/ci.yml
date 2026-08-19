@@ -103,6 +103,37 @@ jobs:
       - name: Show what would be quarantined
         run: uv run flaky quarantine recommend
 
+      # Part two: publish the tool's own measured accuracy. A detector that cannot
+      # state its own false-positive rate is asking for the blind trust it exists to
+      # replace, so the numbers go in the job summary on every run.
+      - name: Measure accuracy against ground truth
+        run: |
+          uv run flaky benchmark --format md >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo ""
+            echo "#### Accuracy vs history available"
+            uv run flaky benchmark --sweep runs
+            echo ""
+            echo "#### Accuracy vs commit coverage"
+            uv run flaky benchmark --sweep coverage
+          } >> "$GITHUB_STEP_SUMMARY"
+          uv run flaky benchmark --format json --output artifacts/accuracy.json
+
+      # Part three: prove history merges correctly across independent machines.
+      - name: Verify history merging
+        run: |
+          uv run flaky hunt -n 4 --seed 101 --db shard-a.db -- \
+            uv run pytest examples/flaky_demo -p no:cacheprovider -q
+          uv run flaky hunt -n 4 --seed 202 --db shard-b.db -- \
+            uv run pytest examples/flaky_demo -p no:cacheprovider -q
+
+          cp shard-a.db merged.db
+          uv run flaky merge shard-b.db --into merged.db
+          # Merging is a set union over content-addressed ids, so a second merge must
+          # add nothing at all.
+          uv run flaky merge shard-b.db --into merged.db | tee /tmp/second-merge.txt
+          grep -q "Merged 0 runs" /tmp/second-merge.txt
+
       - name: Post the report on the pull request
         if: github.event_name == 'pull_request'
         run: cat artifacts/flaky-report.md >> "$GITHUB_STEP_SUMMARY"
@@ -114,7 +145,7 @@ jobs:
           path: artifacts/
           if-no-files-found: error
 
-      # Part two: the tool's own test suite must be clean. If flaky-test-detective
+      # Part four: the tool's own test suite must be clean. If flaky-test-detective
       # has flaky tests, nothing it reports is trustworthy.
       #
       # Integration tests are excluded because they hunt the demo suite themselves,
@@ -124,3 +155,48 @@ jobs:
           uv run flaky hunt -n 3 --seed 7 --db .flaky-self.db -- \
             uv run pytest -q -m "not integration" -p no:cacheprovider
           uv run flaky analyze --db .flaky-self.db --fail-on flaky
+
+  action:
+    name: The published Action, used on this repo
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Produce a JUnit report with real flakes in it
+        run: |
+          uv sync --python 3.12
+          mkdir -p reports
+          uv run pytest examples/flaky_demo -p no:cacheprovider -q \
+            --junitxml=reports/junit.xml || true
+
+      # `./` uses the action.yml in this checkout, which is how a composite action
+      # gets dogfooded in its own repository. If the action is broken, this fails.
+      - name: Flaky Test Detective
+        id: flaky
+        uses: ./
+        with:
+          report-path: reports/junit.xml
+          # Reporting only: the demo suite is deliberately flaky and contains a
+          # deliberately broken test, so a gating run here would always fail.
+          fail-on: none
+          cache-key: flaky-action-demo
+
+      - name: Show the outputs the action exposes
+        run: |
+          echo "exit code      : ${{ steps.flaky.outputs.exit-code }}"
+          echo "actionable     : ${{ steps.flaky.outputs.actionable }}"
+          echo "known flakes   : ${{ steps.flaky.outputs.known-flakes }}"
+          echo "all known flaky: ${{ steps.flaky.outputs.all-known-flaky }}"
+          echo "summary        : ${{ steps.flaky.outputs.summary }}"
+
+          # test_known_broken always fails and is never a flake, so the action must
+          # report at least one failure needing a human.
+          test "${{ steps.flaky.outputs.actionable }}" -ge 1

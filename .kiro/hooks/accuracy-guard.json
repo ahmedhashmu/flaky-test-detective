@@ -1,0 +1,16 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Accuracy guard",
+      "trigger": "PostFileSave",
+      "description": "Re-measures detection accuracy against ground truth whenever a scoring or detection module changes. The rules in analysis/ have been wrong three times in ways no unit test caught but the benchmark did, so any edit there is checked against labelled data immediately rather than at review time.",
+      "matcher": "src/flaky_detective/(analysis|benchmark)/.*\\.py$",
+      "timeout": 180,
+      "action": {
+        "type": "command",
+        "command": "uv run pytest tests/test_benchmark.py -q"
+      }
+    }
+  ]
+}

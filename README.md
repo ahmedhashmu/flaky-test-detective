@@ -1,8 +1,11 @@
 # Flaky Test Detective
 
 [![CI](https://github.com/ahmedhashmu/flaky-test-detective/actions/workflows/ci.yml/badge.svg)](https://github.com/ahmedhashmu/flaky-test-detective/actions/workflows/ci.yml)
+[![Python 3.11–3.14](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue)](pyproject.toml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-Find and diagnose flaky tests from the JUnit XML your test runner already produces.
+**Find and diagnose flaky tests from the JUnit XML your test runner already produces —
+and know how often the answer is wrong.**
 
 ```
 score  verdict     runs      p/f  flips  commit  cause      test
@@ -12,141 +15,165 @@ score  verdict     runs      p/f  flips  commit  cause      test
  0.00  broken        20     0/20      0     0/1  assertion  test_stable.py::test_known_brok…
 ```
 
+Note the last row. That test fails every single run, so it is reported as **broken**, not
+flaky. That distinction is the whole point.
+
+---
+
+## Contents
+
+- [The problem](#the-problem) · [What's different](#whats-different) ·
+  [Measured accuracy](#measured-accuracy)
+- [Install](#install) · [Quick start](#quick-start) ·
+  [The command you'll use most](#the-command-youll-use-most)
+- [All commands](#all-commands) · [How it decides](#how-it-decides) ·
+  [CI integration](#ci-integration)
+- [Quarantine](#quarantine) · [Architecture](#architecture) ·
+  [Limitations](#limitations)
+- [How Kiro was used](#how-kiro-was-used) ·
+  [Testing instructions](#testing-instructions)
+
 ---
 
 ## The problem
 
-A flaky test produces different outcomes for the same code. Teams handle them one
-of two ways, and both are bad:
+A flaky test produces different outcomes for the same code. Teams respond in one of two
+ways, and both are bad:
 
-1. **Retry everything.** `--reruns 3` on the whole suite. Real regressions get
-   masked and CI time triples.
-2. **Ignore red builds.** Once the build is "always a bit red", failures stop
-   carrying information and genuine breakage ships.
+1. **Retry everything.** `--reruns 3` on the whole suite. Real regressions get masked and
+   CI time triples.
+2. **Ignore red builds.** Once the build is "always a bit red", failures stop carrying
+   information and genuine breakage ships.
 
-The blocker is not willingness to fix flakes. It is that you cannot *identify*
-them. A single failed CI run is indistinguishable from a real regression at the
-moment you look at it. Telling them apart needs history across many runs,
-correlated with the commit under test, and almost nobody has that in a queryable
-form. CI providers keep logs, not structured outcomes.
+The blocker is not willingness to fix flakes — it is that you cannot *identify* them. A
+single failed CI run is indistinguishable from a real regression at the moment you look at
+it. Telling them apart needs history across many runs, correlated with the commit under
+test, and almost nobody has that in a queryable form. CI providers keep logs, not
+structured outcomes.
 
-## What this does differently
+## What's different
 
-**It looks for proof, not patterns.** The primary signal is *same-commit
-divergence*: one test, one commit SHA, both a pass and a fail. The code was
-byte-identical, so the code is not the variable. That is evidence, not inference.
+**It looks for proof, not patterns.** The primary signal is *same-commit divergence*: one
+test, one commit SHA, both a pass and a fail. The code was byte-identical between those
+runs, so whatever varied, it was not the code. That is evidence, not inference.
 
-Flip rate (pass↔fail transitions over time) is used too, but weighted lower and
-capped, because a single pass→fail transition is far more likely to be a
-regression than a flake. Every score is shown alongside the counts it came from,
-so you can check the arithmetic instead of trusting it.
+**It refuses to cry wolf.** A consistently failing test is reported as `broken` or
+`regression`, never flaky, because labelling a real break "flaky" teaches you to re-run
+instead of investigate. **Measured false-alarm rate: 0.0%.**
 
-**It refuses to cry wolf.** A test that fails consistently is reported as
-`broken` or `regression`, never as flaky, because labelling a real break "flaky"
-teaches you to re-run instead of investigate. That is the exact habit this tool
-exists to break.
+**It knows how often it's wrong.** `flaky benchmark` generates test histories with known
+ground truth, runs the real analysis over them, and reports precision and recall per
+verdict — including the weak numbers. Most tools in this space ask you to take accuracy on
+faith.
 
-**It tells you what to fix, not just what is broken.** "This test is flaky" is
-useless. "This test fails whenever it runs after `test_registers_session`, 100% of
-the time, so reset that shared state in teardown" is a diff.
+**It tells you what to fix.** Not "this test is flaky" but "this test fails whenever it
+runs after `test_registers_session`, 100% of the time — reset that shared state in
+teardown".
 
-**It works for any language.** The tool reads JUnit XML and never reads your
-source, so pytest, jest, go, JUnit, Gradle and .NET all work without it knowing
-anything about them.
+**It works for any language.** The tool reads JUnit XML and never reads your source, so
+pytest, jest, go, JUnit, Gradle and .NET all work without it knowing anything about them.
+
+## Measured accuracy
+
+107 tests with known labels, 30 runs each, seed 1234. Reproduce with `flaky benchmark`.
+
+| Metric | Value |
+|---|---|
+| **False alarm rate** — a real break reported as flaky | **0.0%** (0 of 16) |
+| **Missed break rate** — a flake reported as a break | 5.4% (2 of 37) |
+| Overall accuracy | 93.5% |
+
+| Label | Support | Precision | Recall | F1 |
+|---|------:|----------:|-------:|---:|
+| `broken` | 8 | 1.000 | 1.000 | 1.000 |
+| `stable` | 48 | 0.980 | 1.000 | 0.990 |
+| `flaky` | 37 | 1.000 | 0.811 | 0.896 |
+| `regression` | 8 | 0.800 | 1.000 | 0.889 |
+| `fixed` | 6 | 0.600 | 1.000 | 0.750 |
+
+Order dependence: **8 of 8 diagnosed, all naming the correct polluter.**
+
+The false-alarm rate is 0.0% across six different seeds. Two honest weak spots: at only
+**5 runs** of history it rises to 12.5%, and with **no commit SHAs** it rises to 25% —
+which is the design's central claim about same-commit divergence, confirmed by
+measurement. Full tables, the confusion matrix and what the benchmark cannot prove are in
+**[docs/accuracy.md](docs/accuracy.md)**.
 
 ## Install
 
-Requires Python 3.11 or newer; 3.11, 3.12, 3.13 and 3.14 are tested in CI. No
-services, no accounts, no network access, no credentials.
+Python 3.11+; 3.11, 3.12, 3.13 and 3.14 are tested in CI. No services, no accounts, no
+network access, no credentials.
 
 ```sh
 git clone https://github.com/ahmedhashmu/flaky-test-detective
 cd flaky-test-detective
 
-uv sync                        # with uv
-uv run flaky --help
+uv sync && uv run flaky --help          # with uv
 ```
 
-Or with plain pip. The dev tools are declared as a `dev` extra as well as a
-dependency group, so both installers work:
+Or with plain pip — the dev tools are declared as a `dev` extra as well as a dependency
+group, so both installers work:
 
 ```sh
 python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"        # tool plus pytest, ruff and mypy
-pip install -e .               # just the tool, if you only want to run it
+pip install -e ".[dev]"                 # tool plus pytest, ruff, mypy
+pip install -e .                        # just the tool
 flaky --help
-```
-
-To use it against your own project:
-
-```sh
-uv tool install .           # puts `flaky` on your PATH
 ```
 
 ## Quick start
 
-Two ways in. Either hunt for flakes now, or feed in reports you already have.
+Two ways in: hunt for flakes now, or feed in reports you already have.
 
-### Hunt: provoke flakes locally
+### Hunt — provoke flakes locally
 
 ```sh
 flaky hunt -n 20 -- pytest tests/
 ```
 
-This runs your suite 20 times, randomizing test order between runs, and records
-every outcome. Real output against this repo's demo suite:
+Runs your suite 20 times, randomizing test order between runs, recording every outcome.
 
 ```
 Hunting with pytest: 20 iterations, order randomization on.
     1/20    0.2s    7 failed  0 flaky so far
     2/20    0.2s    3 failed  8 flaky so far
-    3/20    0.3s    6 failed  9 flaky so far
     ...
    20/20    0.3s    5 failed  10 flaky so far
 Collected 20 of 20 iterations in 4.9s.
 Found 10 flaky tests. Run `flaky analyze` for detail.
 ```
 
-### Ingest: use the reports CI already produces
+### Ingest — use what CI already produces
 
 ```sh
 flaky ingest 'reports/**/*.xml'
 ```
 
-Commit SHA, branch and CI run id are detected automatically from git and from
-GitHub Actions, GitLab, CircleCI, Jenkins, Buildkite, Azure and Travis. Ingest is
-idempotent: re-presenting the same report is a no-op, so CI retries cannot
-double-count.
+Commit SHA, branch and CI run id are detected automatically from git and from GitHub
+Actions, GitLab, CircleCI, Jenkins, Buildkite, Azure and Travis. Ingest is idempotent, so
+CI retries cannot double-count.
 
-### Then look at the results
+### Then look
 
 ```sh
 flaky analyze
 ```
 
 ```
-╭─ 20 runs, 320 results, 16 tests 2026-08-18 to 2026-08-18 ────────────────────────╮
+╭─ 20 runs, 320 results, 16 tests ─────────────────────────────────────────────────╮
 │ 10 flaky  1 broken                                                               │
 ╰──────────────────────────────────────────────────────────────────────────────────╯
 All under examples/flaky_demo/
 score  verdict     runs      p/f  flips  commit  cause      test
  0.91  flaky         20    10/10     13     1/1  timeout    test_timing.py::test_worker_fin…
  0.87  flaky         20     12/8     11     1/1  race       test_concurrency.py::test_appen…
- 0.84  flaky         20     11/9      9     1/1  race       test_concurrency.py::test_count…
  0.84  flaky         20     9/11      9     1/1  order      test_shared_state.py::test_expe…
- 0.83  flaky         20     14/6      8     1/1  network    test_network.py::test_client_co…
- 0.83  flaky         20    10/10      8     1/1  time       test_timing.py::test_token_stil…
- 0.81  flaky         20     12/8      7     1/1  order      test_shared_state.py::test_coun…
- 0.81  flaky         20     16/4      7     1/1  assertion  test_timing.py::test_batch_comp…
- 0.79  flaky         20     9/11      6     1/1  random     test_randomness.py::test_shuffl…
- 0.76  flaky         20     2/18      4     1/1  random     test_randomness.py::test_sample…
  0.00  broken        20     0/20      0     0/1  assertion  test_stable.py::test_known_brok…
 
 Diagnosis
   examples/flaky_demo/test_shared_state.py::test_expects_clean_registry
     order dependent: fails after test_shared_state.py::test_registers_session
     in 100% of its failures
-    also runs later when it fails: position 10 on average versus 6 when passing
     Reset the shared state in setup or teardown so the outcome does not depend
     on what ran before it.
   examples/flaky_demo/test_network.py::test_client_connects_once_server_is_listening
@@ -155,13 +182,9 @@ Diagnosis
     someone else's uptime.
 ```
 
-Note the last row. `test_known_broken` fails every single run, so it is reported
-as **broken**, not flaky. That distinction is the difference between exit code 2
-and exit code 1.
+## The command you'll use most
 
-## The command you will actually use most
-
-`flaky triage` answers the question you have when CI goes red: **investigate, or
+`flaky triage` answers the question you actually have when CI goes red: **investigate, or
 re-run?**
 
 ```sh
@@ -179,15 +202,13 @@ Known regressions or broken tests
 Known flakes
   test_network.py::test_client_connects_once_server_is_listening
       score 0.83, 6/20 runs failed
-  test_timing.py::test_token_still_valid_at_check_time
-      score 0.83, 10/20 runs failed
   ...
 ```
 
 Six tests failed. One matters. Exit code 2.
 
-History is evaluated with the triaged run **excluded**, so a first-time failure
-cannot use the evidence of itself to argue that it is flaky.
+History is evaluated with the triaged run **excluded**, so a first-time failure cannot use
+the evidence of itself to argue it is flaky.
 
 ## All commands
 
@@ -196,298 +217,239 @@ cannot use the evidence of itself to argue that it is flaky.
 | `flaky init` | Write a commented `.flaky.toml` and create the database |
 | `flaky ingest <paths…>` | Parse JUnit XML files, directories or globs |
 | `flaky hunt -- <cmd>` | Run a test command N times, recording every outcome |
-| `flaky analyze` | Ranked flakes with diagnosis, to the terminal |
+| `flaky analyze` | Ranked flakes with diagnosis |
 | `flaky triage <report>` | Known flakes vs new breakage for one run |
-| `flaky report -f md\|json\|html` | Render for a PR comment, a script, or a browser |
+| `flaky blame <test-id>` | Which commit introduced the flakiness |
+| `flaky merge <sources…>` | Pool history from other machines or CI shards |
+| `flaky benchmark` | Measure this tool's own accuracy |
+| `flaky report -f md\|json\|html` | Render for a PR, a script, or a browser |
 | `flaky history <test-id>` | One test's timeline, run by run |
 | `flaky stats` | What is in the database |
 | `flaky quarantine …` | `list`, `recommend`, `add`, `remove`, `export`, `verify` |
 
-Every command has usable `--help`. A few worth knowing:
-
 ```sh
-flaky hunt -n 50 --stop-after 3 -- pytest tests/   # stop once 3 flakes are found
-flaky hunt -n 20 --no-shuffle -- pytest tests/     # keep the natural order
+flaky hunt -n 50 --stop-after 3 -- pytest tests/   # stop once 3 flakes appear
 flaky hunt --report-path target/surefire-reports -- mvn test
-flaky analyze --last 50 --branch main              # only recent runs, one branch
-flaky analyze --threshold 0.4                      # stricter bar for "flaky"
-flaky history test_expects_clean_registry          # partial ids resolve
+flaky analyze --last 50 --branch main              # recent runs, one branch
+flaky merge shards/                                # every *.db in a directory
+flaky benchmark --sweep coverage                   # accuracy vs commit data
 flaky report -f html -o flaky.html                 # standalone page, no CDN
 ```
 
-### `flaky hunt` and order randomization
+### `flaky blame`
 
-Order randomization is what surfaces order-dependent flakes, and it needs runner
-support. The tool **probes for it** by running your command with `--help` and
-looking for the flag, rather than guessing from the runner name — because for
-pytest it comes from an optional plugin.
+```
+examples/flaky_demo/test_shared_state.py::test_expects_clean_registry
 
-| Runner | Report flag injected | Randomization | Needs |
+  First diverged at  a3f2c91
+  Last clean commit  7b18e04
+
+  Look at what changed between those two commits.
+```
+
+And when the data cannot support an answer, it says so rather than blaming the oldest
+commit to hand — `predates_history`, `no_divergence`, `too_sparse` and `no_commit_data`
+each get their own explanation.
+
+### Order randomization
+
+Randomization is what surfaces order-dependent flakes, and it needs runner support. The
+tool **probes** for it by running your command with `--help`, rather than guessing from
+the runner name, because for pytest it comes from an optional plugin.
+
+| Runner | Report flag | Randomization | Needs |
 |---|---|---|---|
 | pytest | `--junitxml=…` | `--randomly-seed=N` | `pytest-randomly` |
-| jest | `JEST_JUNIT_OUTPUT_FILE` env | `--shuffle --seed=N` | jest 29+, `jest-junit` |
+| jest | `JEST_JUNIT_OUTPUT_FILE` | `--shuffle --seed=N` | jest 29+, `jest-junit` |
 | vitest | `--outputFile=…` | `--sequence.shuffle` | vitest |
 | go (`gotestsum`) | `--junitfile=…` | `-shuffle=on` | Go 1.17+ |
-| anything else | use `--report-path` | not available | — |
+| anything else | use `--report-path` | unavailable | — |
 
 If randomization is unavailable it says so loudly rather than running N identical
-iterations and letting you believe you had tested for order dependence.
+iterations and letting you believe you tested for order dependence.
 
 ## How it decides
-
-Full reasoning, including two rules that were wrong and had to be corrected, is in
-[`.kiro/specs/flaky-test-detective/design.md`](.kiro/specs/flaky-test-detective/design.md).
-The short version:
 
 ```
 divergence_rate = commits where the test both passed and failed
                   ÷ commits where it ran more than once
-
 flip_rate       = pass↔fail transitions ÷ (runs − 1)
 
 raw             = 0.7 · divergence_rate + 0.3 · flip_rate
-confidence      = min(1, runs ÷ 10)
-score           = raw · (0.5 + 0.5 · confidence)
+score           = raw · (0.5 + 0.5 · min(1, runs ÷ 10))
 ```
 
-With no commit SHAs available, the weight falls back onto flip rate alone but is
-capped at 0.85 — inference must not be able to reach the same ceiling as proof.
-
-### Verdicts
-
-Exactly one applies to each test.
+Without commit SHAs the weight falls back onto flip rate alone, capped at 0.85 —
+inference must not reach the same ceiling as proof.
 
 | Verdict | Meaning |
 |---|---|
 | `flaky` | Different outcomes for the same code |
 | `regression` | Consistent failure that used to pass |
 | `broken` | Has never passed in recorded history |
-| `fixed` | Was flaky, now stable for N consecutive runs |
+| `fixed` | Was flaky, now stable for 10 consecutive runs |
 | `stable` | Everything else |
 
-### Root-cause categories
+Root causes — `timeout`, `race`, `order_dependence`, `network`, `resource`,
+`time_dependence`, `randomness`, `assertion` — are heuristics, and the matched terms are
+always shown so a wrong guess is visible rather than authoritative. Classification never
+influences the score: a guess about *why* a test is flaky must not change *whether* it is
+called flaky.
 
-Heuristics, and labelled as such. The matched terms are always shown so you can
-overrule them. `order_dependence` is the exception: it is measured from run
-positions and predecessors, not guessed from text, and it names the polluting test.
-
-`timeout` · `race` · `order_dependence` · `network` · `resource` ·
-`time_dependence` · `randomness` · `assertion`
+Full detail, including the two rules that were wrong first and the measurements that fixed
+them: **[docs/scoring.md](docs/scoring.md)**.
 
 ## CI integration
 
-### Exit codes
-
-| Code | Meaning |
-|---|---|
-| `0` | Clean |
-| `1` | Flaky tests found, nothing else needing a human |
-| `2` | Regression or broken test found |
-| `3` | Usage or input error |
-
-`analyze` and `report` default to `--fail-on none`, so reading a report never
-fails a shell. `triage` defaults to failing, because gating is its purpose.
-
-### GitHub Actions
-
-Gate a pull request on new breakage while tolerating known flakes:
+One step, with history persistence handled:
 
 ```yaml
 - name: Run tests
   run: pytest --junitxml=reports/junit.xml
-  continue-on-error: true
+  continue-on-error: true          # let the tool decide whether this is fatal
 
-- name: Restore flake history
-  uses: actions/cache@v4
+- uses: ahmedhashmu/flaky-test-detective@main
   with:
-    path: .flaky.db
-    key: flaky-db-${{ github.run_id }}
-    restore-keys: flaky-db-
-
-- name: Triage
-  run: |
-    flaky triage reports/junit.xml --ingest --format md >> "$GITHUB_STEP_SUMMARY"
-    flaky triage reports/junit.xml
+    report-path: reports/junit.xml
+    ingest-only: ${{ github.ref == 'refs/heads/main' }}
 ```
 
-Exit 0 means every failure was a known flake. Exit 2 means something needs a
-human.
+Known flakes do not block the merge. A real break does. The triage summary is posted as a
+PR comment that updates in place rather than adding one per push.
 
-This repository does exactly this to itself in
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml), including a step that
-hunts its *own* test suite and fails the build if a single flaky test is found.
+| Exit code | Meaning |
+|---|---|
+| `0` | Clean |
+| `1` | Flaky tests found, nothing needing a human |
+| `2` | Regression or broken test found |
+| `3` | Usage or input error |
 
-### Sharing history across machines
-
-The database is one SQLite file. Either cache it in CI (as above), commit it if
-your suite is small, or point `--db` at a shared volume. There is deliberately no
-server to run.
+Sharded builds, GitLab, and generic CI recipes: **[docs/ci-integration.md](docs/ci-integration.md)**.
 
 ## Quarantine
 
-Quarantine is a tourniquet, not a cure, so every entry carries an expiry date.
+A tourniquet, not a cure — so every entry carries an expiry date.
 
 ```sh
-flaky quarantine recommend                  # dry run
-flaky quarantine recommend --apply          # write .flaky-quarantine.json
+flaky quarantine recommend --apply
 flaky quarantine export -f pytest-conftest -o conftest_quarantine.py
-flaky quarantine verify --release           # re-check expired entries
+flaky quarantine verify --release
 ```
 
-Regressions and broken tests are **never** recommended for quarantine.
-Quarantining a real failure is how bugs reach production.
+Prefer `pytest-conftest` in CI: it skips tests with a visible reason rather than removing
+them silently, because a quarantined test nobody can see is a quarantined test nobody will
+fix.
 
-Export formats: `pytest-deselect`, `pytest-conftest`, `jest`, `list`, `json`.
-`pytest-conftest` is the one to prefer in CI — it skips tests with a visible
-reason rather than removing them silently, because a quarantined test nobody can
-see is a quarantined test nobody will fix.
+Regressions and broken tests are **never** recommended for quarantine. Quarantining a real
+failure is how bugs reach production.
 
-The `jest` export prints the test names and then explains that Jest cannot exclude
-by test name. That is a real limitation of Jest, and stating it is better than
-emitting a config snippet that looks like it works.
+## Architecture
 
-## Configuration
+```mermaid
+flowchart LR
+    ci["CI artifacts<br/>or flaky hunt"] --> ingest["ingest/<br/><i>6 runner dialects</i>"]
+    ingest --> db[("SQLite<br/><i>content-addressed</i>")]
+    db --> analysis["analysis/<br/><i>pure functions</i>"]
+    analysis --> out["report/<br/><i>console · md · json · html</i>"]
+    analysis --> q["quarantine"]
+    bench["benchmark/<br/><i>ground truth</i>"] -.->|"labelled data"| analysis
 
-Optional. `flaky init` writes a commented `.flaky.toml`; discovery walks up from
-the current directory. Any flag overrides the file.
-
-`COLUMNS` is honoured for output width, which is worth setting in CI so that
-report width does not depend on whichever runner picked up the job.
-
-```toml
-[flaky]
-db = ".flaky.db"
-quarantine = ".flaky-quarantine.json"
-flake_threshold = 0.15          # score above which a test is called flaky
-quarantine_threshold = 0.4      # higher: naming a flake is cheap, removing it is not
-confidence_runs = 10            # runs needed before a score is fully trusted
-fixed_run_streak = 10           # consecutive passes before "fixed"
-hunt_iterations = 10
-quarantine_days = 14
-ignore = []                     # test id substrings to exclude
+    classDef pure fill:#e8f5e9,stroke:#2e7d32
+    class analysis,bench pure
 ```
 
-## JSON output
+Dependency direction is one way — `cli → report → analysis → storage → models` — and three
+rules keep it that way: `analysis/` may not import `sqlite3` or `storage`, `report/` may
+not compute a derived value, and runtime dependencies are capped at `typer` and `rich`.
 
-Stable, documented shape, versioned by `schema_version`. Every derived number
-comes with the counts behind it.
+All three are **enforced by tests**, not prose. That is what makes the benchmark possible:
+because analysis is pure, the harness feeds it generated data and measures the real
+scoring code rather than a reimplementation of it.
 
-```jsonc
-{
-  "schema_version": 1,
-  "summary": {
-    "runs": 20, "results": 320, "tests": 16,
-    "flaky": 10, "regressions": 0, "broken": 1, "fixed": 0,
-    "has_commit_data": true,        // false means scores rest on the weaker signal
-    "commit_coverage": 1.0
-  },
-  "tests": [{
-    "test_id": "…", "verdict": "flaky", "score": 0.91,
-    "evidence": {
-      "runs": 20, "passes": 10, "failures": 10, "flips": 13,
-      "divergent_commits": 1, "observed_commits": 1, "confidence": 1.0
-    },
-    "cause": { "category": "timeout", "matched": ["timed out"], "remediation": "…" },
-    "order_dependence": null
-  }],
-  "clusters": [{ "signature": "…", "test_ids": ["…"], "test_count": 3 }]
-}
-```
-
-## Supported runners
-
-| Runner | Status |
-|---|---|
-| pytest | **Verified** against real output (pytest 9, default `xunit2`) |
-| jest (`jest-junit`) | **Verified** against real output (jest 29, jest-junit 16) |
-| go (`go-junit-report`) | Parser written to the documented shape, not validated live |
-| Maven Surefire | Parser written to the documented shape, including `<flakyFailure>` |
-| Gradle | Nested `<testsuite>` handled |
-| .NET (`trx2junit`) | Parser written to the documented shape, not validated live |
-
-The distinction is honest and matters: no Go, JVM or .NET toolchain was available
-on the build machine, so those parsers are structurally faithful but unproven
-against live runner output. Details in
-[`tests/fixtures/README.md`](tests/fixtures/README.md).
-
-Where a runner records its own retries (Surefire's `<flakyFailure>`,
-`pytest-rerunfailures`), that is treated as direct evidence of flakiness — the
-runner watched one test produce two outcomes in a single run.
+Diagrams for the data model and the verdict decision flow:
+**[docs/architecture.md](docs/architecture.md)**.
 
 ## Limitations
 
-Stated plainly, because a tool about trustworthy signals should be honest about
-its own.
+Stated plainly, because a tool about trustworthy signals should be honest about its own.
 
-- **Order dependence only checks the immediately preceding test.** A polluter
-  running several tests earlier is missed. Checking every earlier test for every
-  candidate is quadratic in suite size.
-- **Root-cause categories are heuristics.** They will misclassify. The matched
-  terms are shown so you can tell when they have.
-- **No commit SHAs means weaker conclusions.** The tool says so in every output
-  format rather than presenting flip-rate-only scores as equally sound.
+- **Below 10 runs of history it is meaningfully less reliable.** At 5 runs the false-alarm
+  rate is 12.5%. Number comes from [measurement](docs/accuracy.md), not a guess.
+- **Without commit SHAs the false-alarm rate is 25%.** Said in every output format when
+  commit data is missing.
+- **Low-rate flakes look `fixed`.** A test that failed twice in 30 runs then passed 20
+  times running is indistinguishable from a fixed one until it fails again. `fixed`
+  precision is 0.600.
+- **Order dependence only checks the immediately preceding test.** A polluter running
+  several tests earlier is missed; checking all of them is quadratic in suite size.
+- **Root-cause categories are heuristics.** They will misclassify; matched terms are shown
+  so you can tell when they have.
+- **The benchmark uses synthetic data.** Real flakiness clusters; the generator models
+  independent draws.
 - **JUnit XML only.** No TAP or Allure yet.
+- **go, Surefire and .NET parsers are unvalidated against live runners** — those
+  toolchains were unavailable. Provenance per fixture in
+  [tests/fixtures/README.md](tests/fixtures/README.md).
 - **It does not fix anything.** Root causes are semantic.
-- **Test ids must be stable across runs.** Parameterized ids containing random
-  values are normalized, but a runner that renames tests between runs will
-  fragment history.
 
 ## How Kiro was used
 
-This project was built with Kiro using its spec-driven workflow. The `.kiro/`
-directory is the record, and it is worth reading rather than taking on trust.
+Built with Kiro using its spec-driven workflow. `.kiro/` is the record, and it is worth
+reading rather than taking on trust.
 
-**Specs** — [`.kiro/specs/flaky-test-detective/`](.kiro/specs/flaky-test-detective/)
-holds `requirements.md` (37 numbered functional requirements plus acceptance
-criteria), `design.md` (architecture, the scoring maths, and the trade-offs), and
-`tasks.md` (20 implementation tasks, each mapped back to requirements).
-Requirements and design were settled before implementation, and the design
-document was updated whenever reality disagreed with it.
+**Two specs, not one.** [`.kiro/specs/flaky-test-detective/`](.kiro/specs/flaky-test-detective/)
+built the detector: 37 numbered requirements, a design document, 20 tasks. Then a review of
+the finished tool exposed gaps that no extra test coverage would fix, and
+[`.kiro/specs/accuracy-and-adoption/`](.kiro/specs/accuracy-and-adoption/) addressed them —
+the tool could not prove its own accuracy, history could not be shared across machines, and
+CI adoption took too many steps. The second spec is the evidence that the workflow was used
+*iteratively* under new requirements, not once at the start.
 
-**Steering** — [`.kiro/steering/`](.kiro/steering/) holds three always-on
-documents that shaped every file: `product.md` (the "never cry wolf" principle and
-a fixed vocabulary), `tech.md` (XML safety, error-handling categories,
-parameterized SQL, determinism rules), and `structure.md` (the one-way dependency
-direction). Those rules are not decoration — `tests/test_architecture.py` turns
-them into 60 enforced assertions.
+**Steering shaped every file.** [`.kiro/steering/`](.kiro/steering/) holds three always-on
+documents: `product.md` (the "never cry wolf" principle and a fixed vocabulary),
+`tech.md` (XML safety, error-handling categories, parameterized SQL, determinism), and
+`structure.md` (the one-way dependency direction). Those are not decoration —
+[`tests/test_architecture.py`](tests/test_architecture.py) turns them into 60+ enforced
+assertions.
 
-**Hooks** — [`.kiro/hooks/`](.kiro/hooks/) holds three: lint on save, an
-architecture guard that fires on any change under `analysis/` or `report/`, and
-the fast test suite after each spec task.
+**Hooks.** [`.kiro/hooks/`](.kiro/hooks/): lint on save, an architecture guard that fires on
+any change under `analysis/` or `report/`, and the fast test suite after each spec task.
 
 ### The part worth actually looking at
 
-The most useful thing Kiro did was catch its own mistakes by measuring output
-against the demo suite. Three rules were written, tested, found wrong, and
-rewritten. All three are documented in `design.md` with the measurements:
+The most valuable thing Kiro did was **catch its own mistakes by measuring output against
+ground truth**. Five rules were written, tested, found wrong, and rewritten. All are
+documented with the measurements in [`docs/adr/`](docs/adr/):
 
-1. **Order dependence, v1.** Separation of mean positions divided by pooled
-   standard deviation, flagged above 1.0. Misfired: labelled a purely random test
-   order-dependent at 1.1σ.
-2. **Order dependence, v2.** Added a sample-size-aware t-statistic and made
-   predecessor correlation an independent trigger. Misfired differently: flagged
-   eight of ten demo tests with a reported confidence of 100%, because in a
-   shuffled ten-test suite a given predecessor precedes the victim only three or
-   four times, and a test that already fails 70% of the time will fail all four by
-   chance about a quarter of the time.
-3. **Order dependence, v3 (final).** Measuring 40 shuffled iterations showed the
-   two *strongest* position signals were both timing flakes (t = 3.47), while the
-   two genuinely order-dependent tests scored t ≈ 2.3. Position tracks machine
-   warm-up, not state pollution. Detection now requires naming a polluter that
-   beats the test's own base failure rate. Result: exactly the two real victims,
-   both correctly naming `test_registers_session`.
+1. **Order dependence, twice.** v1 flagged a purely random test as order-dependent. v2
+   flagged 8 of 10 demo tests with 100% reported confidence. The measurement that settled
+   it: over 40 shuffled iterations, the two *strongest* position signals were both timing
+   flakes (t = 3.47) while the genuinely order-dependent tests scored t ≈ 2.3. Position
+   tracks machine warm-up, not state pollution. → [ADR-0004](docs/adr/0004-order-dependence-needs-a-polluter.md)
+2. **Regression detection.** Reported 7 of 37 known flakes as regressions — including one
+   with 18 flips and divergence at 10 of 15 commits. Fixed by requiring the failure streak
+   to beat the test's own baseline rate. Missed-break rate 18.9% → 5.4%, false alarms
+   still 0%. → [ADR-0006](docs/adr/0006-streak-beats-chance.md)
+3. **Short-history false alarms.** Sweeping run count found a **50%** false-alarm rate at 5
+   runs, caused by a hard streak floor of 3. Now scales with history: 50% → 12.5%.
+4. **Flip-rate-only scoring** could reach 1.00 with no commit data — identical to
+   proof-backed. Capped at 0.85.
+5. **The benchmark had a bug in itself**, reporting polluter precision of 0.000 while the
+   detector was perfect. Overlapping positions in generated data made "ran immediately
+   before" arbitrary. The harness was measuring its own bug — which is why the generator is
+   now tested as carefully as the scorer. → [ADR-0007](docs/adr/0007-measure-our-own-accuracy.md)
 
-Two more corrections came from writing tests: regression detection was
-mislabelling unlucky flakes, and flip-rate-only scoring could reach 1.00 — the
-same as a score backed by proof.
+A flaky test was also found in **this project's own suite**: CLI assertions searched for
+phrases in rich-formatted output, which wraps to the terminal, so `"DOCTYPE or ENTITY"`
+passed in a wide shell and failed in a narrow one. Exactly the class of bug the tool
+exists to find, sitting in the tool.
 
 ## Testing instructions
 
-No credentials, no API keys, no network access, no paid services. Everything runs
-locally.
+No credentials, no API keys, no network access, no paid services.
 
-Verified on macOS and Linux. On Windows, run these under WSL, or substitute any
-writable directory for `/tmp`.
+Verified on macOS and Linux. On Windows, run these under WSL, or substitute any writable
+directory for `/tmp`.
 
 ```sh
 git clone https://github.com/ahmedhashmu/flaky-test-detective
@@ -495,19 +457,28 @@ cd flaky-test-detective
 uv sync
 ```
 
-Substitute `pip install -e ".[dev]"` for `uv sync` and drop the `uv run` prefixes
-if you would rather use pip.
+Substitute `pip install -e ".[dev]"` for `uv sync` and drop the `uv run` prefixes to use
+pip instead.
 
-**1. Run the test suite** — 447 tests, about 5 seconds on a laptop:
+**1. Test suite** — 542 tests, about 7 seconds:
 
 ```sh
 uv run pytest
 ```
 
-**2. Watch it find real flakes.** `examples/flaky_demo/` is a suite with genuine
-nondeterminism: real threads racing real deadlines, an unsynchronized counter, a
-loopback socket race, unseeded randomness, and module-level state leaking between
-tests. Nothing is simulated with a coin flip on a hardcoded list.
+**2. See its measured accuracy.** This is the fastest way to judge whether the tool works:
+
+```sh
+uv run flaky benchmark
+```
+
+Expect a false-alarm rate of **0.0%** and accuracy around 93%. Try `--seed 99`, or
+`--sweep coverage` to watch accuracy collapse without commit data.
+
+**3. Watch it find real flakes.** `examples/flaky_demo/` has genuine nondeterminism: real
+threads racing real deadlines, an unsynchronized counter, a loopback socket race, unseeded
+randomness, and module-level state leaking between tests. Nothing is simulated with a coin
+flip on a hardcoded list.
 
 ```sh
 uv run flaky hunt -n 20 --db /tmp/demo.db -- \
@@ -516,25 +487,34 @@ uv run flaky hunt -n 20 --db /tmp/demo.db -- \
 uv run flaky analyze --db /tmp/demo.db
 ```
 
-Expect roughly 10 flaky tests. Then check the three things that matter:
+Expect ~10 flaky tests, then check the three things that matter:
 
-- The four `test_stable_*` tests must score **0.00**. A tool that flagged
-  everything would look identical to a working one without these controls.
-- `test_known_broken` must be **broken**, never flaky. It fails every run.
+- The four `test_stable_*` tests must score **0.00**. Without controls, a tool that flagged
+  everything would look identical to a working one.
+- `test_known_broken` must be **broken**, never flaky.
 - `test_expects_clean_registry` should be **order dependent**, naming
   `test_registers_session` as the polluter.
 
-**3. Try triage**, the gate you would put in CI:
+**4. Triage**, the CI gate:
 
 ```sh
 uv run pytest examples/flaky_demo -q --junitxml=/tmp/run.xml ; true
 uv run flaky triage /tmp/run.xml --db /tmp/demo.db ; echo "exit: $?"
 ```
 
-Several tests will have failed. It should tell you only `test_known_broken`
-needs attention, and exit 2.
+Several tests failed; it should report only `test_known_broken` as needing attention, and
+exit 2.
 
-**4. Check the quarantine export really works:**
+**5. Merge history from two machines:**
+
+```sh
+uv run flaky hunt -n 6 --db /tmp/a.db -- uv run pytest examples/flaky_demo -q
+uv run flaky hunt -n 6 --db /tmp/b.db -- uv run pytest examples/flaky_demo -q
+uv run flaky merge /tmp/b.db --into /tmp/a.db     # 12 runs
+uv run flaky merge /tmp/b.db --into /tmp/a.db     # no-op, idempotent
+```
+
+**6. Verify the quarantine export really works:**
 
 ```sh
 uv run flaky quarantine recommend --db /tmp/demo.db --apply
@@ -542,11 +522,11 @@ uv run flaky quarantine export -f pytest-conftest -o /tmp/qp/qplugin.py
 PYTHONPATH=/tmp/qp uv run pytest examples/flaky_demo -p qplugin -q -rs
 ```
 
-The quarantined tests are reported as skipped with a reason. `test_known_broken`
-still fails, because quarantine never hides a real failure.
+Quarantined tests are reported as skipped with a reason. `test_known_broken` still fails,
+because quarantine never hides a real failure.
 
-**5. Verify the project's own suite is not flaky.** Reasonable thing to demand of
-this particular tool:
+**7. Confirm this project's own suite is not flaky** — a reasonable thing to demand of this
+particular tool:
 
 ```sh
 uv run flaky hunt -n 3 --db /tmp/self.db -- \
@@ -558,17 +538,17 @@ Expect `0 flaky` and exit 0.
 
 ### Notes
 
-- The demo suite is genuinely random, so exact numbers vary run to run. The three
-  checks in step 2 hold every time.
-- To make the demo deterministic (all green except `test_known_broken`), set
-  `FLAKY_DEMO_DETERMINISTIC=1`.
-- `examples/` is excluded from this project's own test collection via
-  `norecursedirs`, so the deliberately flaky suite cannot break the build.
+- The demo suite is genuinely random, so exact numbers vary. The three checks in step 3
+  hold every time.
+- `FLAKY_DEMO_DETERMINISTIC=1` makes the demo deterministic (all green except
+  `test_known_broken`).
+- `examples/` is excluded from this project's own collection via `norecursedirs`, so the
+  deliberately flaky suite cannot break the build.
 
 ## Costs and limits
 
-None. No third-party APIs, no hosted services, no rate limits, no accounts, no
-network access at any point.
+None. No third-party APIs, no hosted services, no rate limits, no accounts, no network
+access at any point.
 
 ## Built with
 
@@ -576,15 +556,26 @@ network access at any point.
 - [Rich](https://rich.readthedocs.io/) — terminal formatting (MIT)
 - [pytest](https://pytest.org/), [ruff](https://docs.astral.sh/ruff/),
   [mypy](https://mypy-lang.org/), [uv](https://docs.astral.sh/uv/) — development
-- [pytest-randomly](https://github.com/pytest-dev/pytest-randomly) — order
-  randomization for the demo (dev only)
+- [pytest-randomly](https://github.com/pytest-dev/pytest-randomly) — order randomization
+  for the demo (dev only)
 
-Runtime dependencies are Typer and Rich, and nothing else. XML parsing, storage
-and hashing all use the Python standard library.
+Runtime dependencies are Typer and Rich, and nothing else — enforced by test. XML parsing,
+storage and hashing all use the standard library.
 
-Test fixtures were captured from real pytest and jest-junit output. The go,
-Surefire and .NET fixtures were written to their documented formats; provenance
-for each is recorded in [`tests/fixtures/README.md`](tests/fixtures/README.md).
+Test fixtures were captured from real pytest and jest-junit output; go, Surefire and .NET
+fixtures were written to their documented formats, with provenance recorded in
+[tests/fixtures/README.md](tests/fixtures/README.md).
+
+## Documentation
+
+| Document | Contents |
+|---|---|
+| [docs/architecture.md](docs/architecture.md) | Pipeline, data model and verdict-flow diagrams |
+| [docs/scoring.md](docs/scoring.md) | The maths, and why each weight is what it is |
+| [docs/accuracy.md](docs/accuracy.md) | Precision and recall against ground truth |
+| [docs/ci-integration.md](docs/ci-integration.md) | Recipes, including sharded builds |
+| [docs/adr/](docs/adr/) | Decision records, including the ones that were wrong first |
+| [.kiro/specs/](.kiro/specs/) | Requirements, design and tasks for both rounds |
 
 ## License
 

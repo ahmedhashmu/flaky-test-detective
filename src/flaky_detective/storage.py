@@ -11,6 +11,7 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
 
@@ -74,6 +75,17 @@ _OUTCOME_COLUMNS = """
 
 class StorageError(RuntimeError):
     """Raised for unusable database state, which is a usage error not a bug."""
+
+
+@dataclass(frozen=True, slots=True)
+class MergeResult:
+    """What one source contributed to a merge."""
+
+    source: str
+    runs_available: int
+    runs_added: int
+    runs_skipped: int
+    results_added: int
 
 
 class Storage:
@@ -205,6 +217,122 @@ class Storage:
         cursor = self._conn.execute("DELETE FROM runs WHERE started_at < ?", (before,))
         self._conn.commit()
         return cursor.rowcount
+
+    def merge_from(self, source: str | Path) -> MergeResult:
+        """Copy every run from another database that this one does not already have.
+
+        This works, rather than being an approximation, because `run_uid` is a content
+        hash. Two databases built independently hold disjoint run sets except where
+        they genuinely ingested the same artifact, and in that case the duplicate
+        should collapse. So merging is a set union: idempotent, and independent of the
+        order the sources are merged in.
+
+        That property is what makes sharded CI and pooled local hunts work. Without
+        it the tool only ever sees the history of one machine.
+        """
+        source_path = Path(source)
+        if not source_path.is_file():
+            raise StorageError(f"No database at {source_path}")
+        if source_path.resolve() == self.path.resolve():
+            raise StorageError(f"Cannot merge {source_path} into itself")
+
+        self._check_source_schema(source_path)
+
+        # ATTACH keeps the copy inside SQLite rather than pulling every row through
+        # Python, and keeps the whole merge in one transaction.
+        self._conn.execute("ATTACH DATABASE ? AS src", (str(source_path),))
+        try:
+            available = self._scalar("SELECT COUNT(*) FROM src.runs")
+            new_uids = [
+                str(row["run_uid"])
+                for row in self._conn.execute(
+                    """
+                    SELECT run_uid FROM src.runs
+                    WHERE run_uid NOT IN (SELECT run_uid FROM main.runs)
+                    """
+                ).fetchall()
+            ]
+
+            if not new_uids:
+                self._conn.commit()
+                return MergeResult(
+                    source=str(source_path),
+                    runs_available=available,
+                    runs_added=0,
+                    runs_skipped=available,
+                    results_added=0,
+                )
+
+            self._conn.execute(
+                """
+                INSERT INTO main.runs (
+                    run_uid, commit_sha, branch, ci_run_id, started_at, source_path,
+                    runner, iteration, seed, total, failed, skipped, duration
+                )
+                SELECT run_uid, commit_sha, branch, ci_run_id, started_at, source_path,
+                       runner, iteration, seed, total, failed, skipped, duration
+                FROM src.runs
+                WHERE run_uid NOT IN (SELECT run_uid FROM main.runs)
+                """
+            )
+
+            # Row ids are per-database, so the foreign key has to be re-pointed. The
+            # join through run_uid is what makes that correct rather than assuming
+            # ids line up, which they do not.
+            placeholders = ",".join("?" * len(new_uids))
+            cursor = self._conn.execute(
+                f"""
+                INSERT INTO main.results (
+                    run_id, test_id, suite, name, status, duration, message, detail,
+                    signature, position, retried
+                )
+                SELECT target.id, r.test_id, r.suite, r.name, r.status, r.duration,
+                       r.message, r.detail, r.signature, r.position, r.retried
+                FROM src.results AS r
+                JOIN src.runs AS s ON s.id = r.run_id
+                JOIN main.runs AS target ON target.run_uid = s.run_uid
+                WHERE s.run_uid IN ({placeholders})
+                """,  # noqa: S608 - only a generated list of ? placeholders is interpolated
+                new_uids,
+            )
+            results_added = cursor.rowcount
+            self._conn.commit()
+        finally:
+            self._conn.execute("DETACH DATABASE src")
+
+        return MergeResult(
+            source=str(source_path),
+            runs_available=available,
+            runs_added=len(new_uids),
+            runs_skipped=available - len(new_uids),
+            results_added=max(0, results_added),
+        )
+
+    def _check_source_schema(self, source_path: Path) -> None:
+        """Refuse a source written by a newer build rather than misreading it."""
+        probe = sqlite3.connect(f"file:{source_path}?mode=ro", uri=True)
+        probe.row_factory = sqlite3.Row
+        try:
+            row = probe.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
+        except sqlite3.DatabaseError as exc:
+            raise StorageError(
+                f"{source_path} is not a flaky-test-detective database: {exc}"
+            ) from exc
+        finally:
+            probe.close()
+
+        if row is None:
+            raise StorageError(f"{source_path} has no schema version recorded")
+        found = int(row["value"])
+        if found > SCHEMA_VERSION:
+            raise StorageError(
+                f"{source_path} uses schema version {found}, but this build understands "
+                f"{SCHEMA_VERSION}. Upgrade flaky-test-detective."
+            )
+
+    def _scalar(self, sql: str) -> int:
+        row = self._conn.execute(sql).fetchone()
+        return int(row[0]) if row else 0
 
     # -- reads ----------------------------------------------------------------
 

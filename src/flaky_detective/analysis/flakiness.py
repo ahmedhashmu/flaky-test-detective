@@ -70,6 +70,32 @@ This guard only applies when no run carried a commit SHA. With commit data,
 because it is evidence rather than inference.
 """
 
+MIN_REGRESSION_STREAK = 2
+"""Floor on the trailing-failure requirement for short histories.
+
+One failure is not a streak, and `_streak_beats_chance` needs at least two
+observations before its probability means anything.
+"""
+
+STREAK_CHANCE_THRESHOLD = 0.01
+"""How improbable a trailing failure streak must be, under the test's own baseline
+behaviour, before it counts as a regression.
+
+This is the fix for the worst finding in the accuracy benchmark. Requiring only a
+trailing streak plus no divergence at the newest commit reported 7 of 37 known
+flakes as regressions -- including one with 18 flips and divergence at 10 of 15
+commits, which is overwhelming proof of flakiness discarded because the last three
+runs happened to fail.
+
+The right question is not "is it failing now" but "is it failing *more* than its own
+history explains". A test that fails 70% of the time produces a three-run streak
+about a third of the time, so that streak is evidence of nothing. A test that has
+never failed and then fails three times running has done something new.
+
+Same "beat chance" reasoning as the polluter test in `ordering.py`, applied to a
+different signal.
+"""
+
 
 def analyze_test(
     test_id: str,
@@ -270,14 +296,65 @@ def _is_regression(evidence: list[TestOutcome], *, flips: int) -> bool:
     - **Without commit SHAs** there is no way to separate "flaky and unlucky" from
       "newly broken", so fall back to shape: a regression flips once, a flake flips
       repeatedly.
+
+    Then, in every case, the streak has to beat chance: it must be longer than this
+    test's own baseline failure rate explains. That is what stops a high-rate flake
+    being reported as a break every time it has an unlucky afternoon.
     """
-    if _trailing(evidence, passing=False) < REGRESSION_STREAK:
+    trailing = _trailing(evidence, passing=False)
+    if trailing < _required_streak(len(evidence)):
         return False
 
     if any(o.commit_sha for o in evidence):
-        return not _latest_commit_diverged(evidence)
+        if _latest_commit_diverged(evidence):
+            return False
+    elif flips > MAX_REGRESSION_FLIPS:
+        return False
 
-    return flips <= MAX_REGRESSION_FLIPS
+    return _streak_beats_chance(evidence, trailing)
+
+
+def _required_streak(runs: int) -> int:
+    """How many trailing failures are needed, given how much history exists.
+
+    A fixed floor of three is wrong when the entire history is five runs. The
+    benchmark caught this: with a five-run window, a textbook regression pattern of
+    `...FF` has only two trailing failures, fell through the regression check, and was
+    reported as flaky. Across the population that produced a 50% false alarm rate at
+    five runs -- by far the worst number the benchmark found.
+
+    Scaling with history fixes it without weakening the long-history case, and
+    `_streak_beats_chance` still has to agree, so a short streak from a genuinely
+    flaky test is not promoted to a regression on length alone.
+
+    Never below two: a single failure is not a streak, and the chance test needs at
+    least two observations to say anything.
+    """
+    return max(MIN_REGRESSION_STREAK, min(REGRESSION_STREAK, runs // 3))
+
+
+def _streak_beats_chance(evidence: list[TestOutcome], trailing: int) -> bool:
+    """Is the trailing failure streak surprising, given how this test usually behaves?
+
+    The baseline is measured over the history *before* the streak began. Including
+    the streak would inflate the rate it is compared against, and would make a
+    genuine regression progressively harder to spot the longer it went unfixed.
+    """
+    baseline_window = evidence[: len(evidence) - trailing]
+    if not baseline_window:
+        # Nothing but the streak. A test that never passed is already classified as
+        # broken before this is reached, so this is a short all-failure history.
+        return True
+
+    failures = sum(1 for outcome in baseline_window if outcome.status.is_failure)
+    baseline_rate = failures / len(baseline_window)
+
+    # Never failed before, and now fails REGRESSION_STREAK times running: that is
+    # unambiguously new behaviour.
+    if baseline_rate == 0.0:
+        return True
+
+    return baseline_rate**trailing <= STREAK_CHANCE_THRESHOLD
 
 
 def _latest_commit_diverged(evidence: list[TestOutcome]) -> bool:

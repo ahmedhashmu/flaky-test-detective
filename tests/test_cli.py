@@ -28,11 +28,15 @@ def invoke(*args: str):
     return runner.invoke(app, list(args))
 
 
-def seed(db: Path, *, iterations: int = 6, commit: str = "c1") -> None:
+def seed(db: Path, *, iterations: int = 6, commit: str = "c1", uid_prefix: str = "run") -> None:
     """Populate a database with a genuinely flaky history.
 
     Built through the real storage layer rather than the CLI, so a CLI test failure
     points at the CLI.
+
+    `uid_prefix` matters for the merge tests. Run ids are content hashes, so two
+    databases seeded with the same prefix hold the *same* runs and merging them is
+    correctly a no-op. Distinct prefixes model what two real machines produce.
     """
     from flaky_detective.models import Status, TestOutcome, TestRun
     from flaky_detective.storage import Storage
@@ -58,7 +62,7 @@ def seed(db: Path, *, iterations: int = 6, commit: str = "c1") -> None:
             )
             store.add_run(
                 TestRun(
-                    run_uid=f"run-{index}",
+                    run_uid=f"{uid_prefix}-{index}",
                     started_at=f"2026-08-{index + 1:02d}T00:00:00+00:00",
                     outcomes=outcomes,
                     commit_sha=commit,
@@ -445,3 +449,161 @@ class TestHuntUsageErrors:
         result = invoke("hunt", "-n", "3", "--db", str(db), "--", "echo", "hi")
         assert result.exit_code == EXIT_USAGE
         assert "--report-path" in result.output
+
+
+class TestBlameCommand:
+    def test_reports_when_no_commit_can_be_blamed(self, db: Path) -> None:
+        """seed() puts every run on one commit, so the honest answer is that the
+        flakiness predates the recorded window."""
+        seed(db)
+        result = invoke("blame", "tests/test_x.py::test_flaky", "--db", str(db))
+        assert result.exit_code == EXIT_OK
+        assert "predates_history" in result.output or "No commit can be blamed" in result.output
+
+    def test_names_the_introducing_commit(self, db: Path) -> None:
+        from flaky_detective.models import Status, TestOutcome, TestRun
+        from flaky_detective.storage import Storage
+
+        with Storage(db) as store:
+            # Two clean commits with two runs each, then divergence at c3.
+            plan = [
+                ("c1", Status.PASSED),
+                ("c1", Status.PASSED),
+                ("c2", Status.PASSED),
+                ("c2", Status.PASSED),
+                ("c3", Status.PASSED),
+                ("c3", Status.FAILED),
+            ]
+            for index, (commit, status) in enumerate(plan):
+                store.add_run(
+                    TestRun(
+                        run_uid=f"b{index}",
+                        started_at=f"2026-08-{index + 1:02d}T00:00:00+00:00",
+                        outcomes=(
+                            TestOutcome(
+                                test_id="t.py::test_x",
+                                name="test_x",
+                                status=status,
+                                message="boom" if status.is_failure else None,
+                                position=0,
+                            ),
+                        ),
+                        commit_sha=commit,
+                    )
+                )
+
+        result = invoke("blame", "t.py::test_x", "--db", str(db))
+        assert result.exit_code == EXIT_OK
+        assert "c3" in result.output
+        assert "c2" in result.output
+
+    def test_unknown_test(self, db: Path) -> None:
+        seed(db)
+        assert invoke("blame", "nope", "--db", str(db)).exit_code == EXIT_USAGE
+
+    def test_partial_match_resolves(self, db: Path) -> None:
+        seed(db)
+        assert invoke("blame", "test_flaky", "--db", str(db)).exit_code == EXIT_OK
+
+
+class TestMergeCommand:
+    def test_merges_and_reports_counts(self, tmp_path: Path) -> None:
+        target, source = tmp_path / "a.db", tmp_path / "b.db"
+        seed(target, iterations=4, commit="c1", uid_prefix="a")
+        seed(source, iterations=4, commit="c2", uid_prefix="b")
+
+        result = invoke("merge", str(source), "--into", str(target))
+        assert result.exit_code == EXIT_OK
+        assert "Merged 4 runs" in result.output
+        assert "8 runs" in result.output
+
+    def test_second_merge_is_a_no_op(self, tmp_path: Path) -> None:
+        target, source = tmp_path / "a.db", tmp_path / "b.db"
+        seed(target, iterations=3, commit="c1", uid_prefix="a")
+        seed(source, iterations=3, commit="c2", uid_prefix="b")
+
+        invoke("merge", str(source), "--into", str(target))
+        result = invoke("merge", str(source), "--into", str(target))
+        assert "Merged 0 runs" in result.output
+        assert "Skipped 3 duplicates" in result.output
+
+    def test_merges_every_database_in_a_directory(self, tmp_path: Path) -> None:
+        """The sharded-CI case: download every shard's artifact, merge the folder."""
+        shards = tmp_path / "shards"
+        shards.mkdir()
+        for index in range(3):
+            seed(
+                shards / f"shard{index}.db",
+                iterations=2,
+                commit=f"c{index}",
+                uid_prefix=f"s{index}",
+            )
+
+        target = tmp_path / "combined.db"
+        seed(target, iterations=0, commit="c9", uid_prefix="target")
+
+        result = invoke("merge", str(shards), "--into", str(target))
+        assert result.exit_code == EXIT_OK
+        assert "from 3 sources" in result.output
+
+    def test_no_databases_found(self, tmp_path: Path) -> None:
+        result = invoke("merge", str(tmp_path / "nothing"), "--into", str(tmp_path / "a.db"))
+        assert result.exit_code == EXIT_USAGE
+
+    def test_unusable_source_is_skipped_not_fatal(self, tmp_path: Path) -> None:
+        target = tmp_path / "a.db"
+        seed(target, iterations=2)
+        junk = tmp_path / "junk.db"
+        junk.write_text("not sqlite")
+
+        result = invoke("merge", str(junk), "--into", str(target))
+        assert result.exit_code == EXIT_OK
+        assert "skipped" in result.output.lower()
+
+
+class TestBenchmarkCommand:
+    def test_console_output(self) -> None:
+        result = invoke("benchmark", "--seed", "7", "--runs", "10")
+        assert result.exit_code == EXIT_OK
+        assert "false alarm" in result.output
+        assert "precision" in result.output
+
+    def test_json_is_parseable(self) -> None:
+        result = invoke("benchmark", "--seed", "7", "--runs", "10", "--format", "json")
+        payload = json.loads(result.output)
+        assert payload["schema_version"] == 1
+        assert "false_alarm_rate" in payload["headline"]
+        assert payload["setup"]["seed"] == 7
+
+    def test_markdown_output(self) -> None:
+        result = invoke("benchmark", "--seed", "7", "--runs", "10", "--format", "md")
+        assert "### Measured accuracy" in result.output
+        assert "| Label |" in result.output
+
+    def test_reproducible_from_a_seed(self) -> None:
+        """An accuracy figure nobody can re-derive is an anecdote."""
+        first = invoke("benchmark", "--seed", "3", "--runs", "10", "-f", "json").output
+        second = invoke("benchmark", "--seed", "3", "--runs", "10", "-f", "json").output
+        assert json.loads(first) == json.loads(second)
+
+    def test_sweep_over_runs(self) -> None:
+        result = invoke("benchmark", "--sweep", "runs")
+        assert result.exit_code == EXIT_OK
+        assert "Runs recorded" in result.output
+
+    def test_sweep_over_coverage(self) -> None:
+        result = invoke("benchmark", "--sweep", "coverage")
+        assert "Commit coverage" in result.output
+
+    def test_unknown_sweep_axis(self) -> None:
+        assert invoke("benchmark", "--sweep", "vibes").exit_code == EXIT_USAGE
+
+    def test_unknown_format(self) -> None:
+        assert invoke("benchmark", "-f", "pdf").exit_code == EXIT_USAGE
+
+    def test_writes_to_a_file(self, tmp_path: Path) -> None:
+        target = tmp_path / "out" / "bench.md"
+        result = invoke("benchmark", "--seed", "7", "--runs", "10", "-f", "md", "-o", str(target))
+        assert result.exit_code == EXIT_OK
+        assert target.is_file()
+        assert "Measured accuracy" in target.read_text()

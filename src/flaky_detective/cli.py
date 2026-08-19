@@ -28,12 +28,16 @@ from . import report as report_module
 from .analysis import analyze as analyze_outcomes
 from .analysis import analyze_one
 from .analysis import triage as triage_run
+from .analysis.attribution import blame as blame_test
+from .benchmark import run_benchmark
+from .benchmark import sweep as run_sweep
 from .config import EXAMPLE_CONFIG, Config, load_config
 from .environment import detect
 from .ingest import ingest_paths, junit
 from .models import AnalysisReport, TestOutcome, Verdict
 from .quarantine import EXPORT_FORMATS, Quarantine, recommend, verify
 from .quarantine import export as export_quarantine
+from .report import benchmark_report
 from .report import console as console_report
 from .runner import HuntError
 from .storage import Storage, StorageError
@@ -444,17 +448,7 @@ def history(
     settings = _settings(config, db)
 
     with _storage(settings) as store:
-        matches = store.find_test_ids(test_id)
-        if not matches:
-            stderr.print(f"No test matching {test_id!r}. Try `flaky analyze` to see what exists.")
-            raise typer.Exit(EXIT_USAGE)
-        if len(matches) > 1 and test_id not in matches:
-            stderr.print(f"{len(matches)} tests match {test_id!r}:")
-            for candidate in matches[:20]:
-                stderr.print(f"  {candidate}")
-            raise typer.Exit(EXIT_USAGE)
-
-        resolved = test_id if test_id in matches else matches[0]
+        resolved = _resolve_test_id(store, test_id)
         outcomes = store.outcomes_for_test(resolved)
         all_outcomes = store.outcomes()
 
@@ -473,6 +467,133 @@ def stats(db: DbOption = None, config: ConfigOption = None) -> None:
     settings = _settings(config, db)
     with _storage(settings) as store:
         console_report.render_stats(store.stats(), stdout)
+
+
+@app.command()
+def blame(
+    test_id: Annotated[str, typer.Argument(help="Full test id, or any part of one.")],
+    db: DbOption = None,
+    config: ConfigOption = None,
+) -> None:
+    """Find the commit where a test started being flaky.
+
+    Reports honestly when the answer is not in the data. Naming the oldest commit in
+    the window would be an accusation the history does not support, and a good way to
+    send someone reverting an innocent change.
+    """
+    settings = _settings(config, db)
+
+    with _storage(settings) as store:
+        resolved = _resolve_test_id(store, test_id)
+        outcomes = store.outcomes_for_test(resolved)
+
+    console_report.render_blame(blame_test(resolved, outcomes), stdout)
+
+
+@app.command()
+def merge(
+    sources: Annotated[
+        list[Path],
+        typer.Argument(help="Databases to merge in. Directories are searched for *.db."),
+    ],
+    into: Annotated[
+        Path | None, typer.Option("--into", help="Target database. Defaults to the configured one.")
+    ] = None,
+    db: DbOption = None,
+    config: ConfigOption = None,
+) -> None:
+    """Combine history from other machines or CI shards.
+
+    Safe to repeat. Runs are identified by a content hash, so merging the same source
+    twice adds nothing and merge order does not affect the result.
+    """
+    settings = _settings(config, db if db else into)
+    found = _expand_databases(sources)
+
+    if not found:
+        stderr.print(f"No databases found in: {', '.join(str(s) for s in sources)}")
+        raise typer.Exit(EXIT_USAGE)
+
+    added = skipped = results = 0
+    with _storage(settings) as store:
+        for source in found:
+            try:
+                outcome = store.merge_from(source)
+            except StorageError as exc:
+                stderr.print(f"skipped {source}: {exc}", style="yellow")
+                continue
+
+            added += outcome.runs_added
+            skipped += outcome.runs_skipped
+            results += outcome.results_added
+            stdout.print(
+                f"  {source.name}: +{outcome.runs_added} runs "
+                f"({outcome.runs_skipped} already present)",
+                style="dim",
+            )
+
+        total_runs = store.run_count()
+
+    stdout.print()
+    stdout.print(
+        f"Merged {added} runs and {results} results from {len(found)} "
+        f"{'source' if len(found) == 1 else 'sources'}. "
+        f"Skipped {skipped} duplicates. {settings.db_path.name} now holds {total_runs} runs."
+    )
+
+
+@app.command()
+def benchmark(
+    seed: Annotated[int, typer.Option("--seed", help="Makes the measurement reproducible.")] = 1234,
+    runs: Annotated[int, typer.Option("--runs", help="Runs recorded per generated test.")] = 30,
+    coverage: Annotated[
+        float, typer.Option("--coverage", help="Fraction of runs carrying a commit SHA.")
+    ] = 1.0,
+    sweep_over: Annotated[
+        str | None,
+        typer.Option("--sweep", help="Sweep accuracy over 'runs' or 'coverage'."),
+    ] = None,
+    fmt: Annotated[str, typer.Option("--format", "-f", help="console, md, or json.")] = "console",
+    output: Annotated[
+        Path | None, typer.Option("--output", "-o", help="Write here instead of stdout.")
+    ] = None,
+    confusion: Annotated[
+        bool, typer.Option("--confusion/--no-confusion", help="Show the confusion matrix.")
+    ] = True,
+) -> None:
+    """Measure this tool's accuracy against data whose answer is known.
+
+    Generates test histories with known labels, runs the real analysis over them, and
+    reports precision and recall per verdict. The two headline figures are the rate at
+    which a genuine break is misreported as flaky, and the reverse.
+
+    Everything is reproducible from --seed.
+    """
+    if sweep_over:
+        try:
+            results = run_sweep(seed=seed, over=sweep_over)
+        except ValueError as exc:
+            stderr.print(str(exc))
+            raise typer.Exit(EXIT_USAGE) from exc
+
+        rendered = benchmark_report.render_sweep_markdown(results, sweep_over)
+        _emit(rendered, output)
+        return
+
+    result = run_benchmark(seed=seed, runs=runs, commit_coverage=coverage)
+
+    if fmt == "console":
+        benchmark_report.render_console(result, stdout, show_confusion=confusion)
+        return
+    if fmt in ("md", "markdown"):
+        _emit(benchmark_report.render_markdown(result), output)
+        return
+    if fmt == "json":
+        _emit(benchmark_report.render_json(result), output)
+        return
+
+    stderr.print(f"Unknown format {fmt!r}. Use console, md, or json.")
+    raise typer.Exit(EXIT_USAGE)
 
 
 @quarantine_app.command("list")
@@ -678,6 +799,55 @@ def quarantine_verify(
 
 
 # -- helpers ------------------------------------------------------------------
+
+
+def _emit(text: str, output: Path | None) -> None:
+    """Write rendered text to a file or to stdout."""
+    if output:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(text, encoding="utf-8")
+        stderr.print(f"Wrote {output}", style="dim")
+    else:
+        stdout.file.write(text)
+
+
+def _expand_databases(sources: list[Path]) -> list[Path]:
+    """Resolve arguments to database files, searching directories.
+
+    Directories are the sharded-CI case: a job downloads every shard's artifact into
+    one folder and merges the lot in a single command.
+    """
+    found: list[Path] = []
+    seen: set[Path] = set()
+
+    for source in sources:
+        candidates = sorted(source.glob("*.db")) if source.is_dir() else [source]
+        for candidate in candidates:
+            if not candidate.is_file():
+                continue
+            resolved = candidate.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            found.append(candidate)
+
+    return found
+
+
+def _resolve_test_id(store: Storage, fragment: str) -> str:
+    """Turn a partial test id into exactly one real one, or exit with guidance."""
+    matches = store.find_test_ids(fragment)
+    if not matches:
+        stderr.print(f"No test matching {fragment!r}. Try `flaky analyze` to see what exists.")
+        raise typer.Exit(EXIT_USAGE)
+    if fragment in matches:
+        return fragment
+    if len(matches) > 1:
+        stderr.print(f"{len(matches)} tests match {fragment!r}:")
+        for candidate in matches[:20]:
+            stderr.print(f"  {candidate}")
+        raise typer.Exit(EXIT_USAGE)
+    return matches[0]
 
 
 def _settings(config: Path | None, db: Path | None, threshold: float | None = None) -> Config:

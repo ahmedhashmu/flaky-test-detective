@@ -1,0 +1,249 @@
+name: "Flaky Test Detective"
+description: >-
+  Triage a red build against accumulated history: separate known flaky tests from
+  genuine new breakage, and comment the result on the pull request.
+author: "Ahmed Hashmi"
+
+branding:
+  icon: "search"
+  color: "yellow"
+
+# A composite action rather than Docker or JavaScript, deliberately. Every step is
+# readable YAML, so anyone adopting this can see exactly what runs in their CI
+# instead of trusting an opaque image.
+
+inputs:
+  report-path:
+    description: >-
+      JUnit XML to triage. Accepts a file, a directory, or a glob. Any runner that
+      emits JUnit XML works; nothing here is pytest-specific.
+    required: true
+
+  fail-on:
+    description: >-
+      When to fail the step: "regression" (default) fails on new breakage but
+      tolerates known flakes, "flaky" fails on any flakiness, "none" never fails and
+      only reports.
+    required: false
+    default: "regression"
+
+  comment:
+    description: >-
+      Post the triage summary as a pull-request comment. Updates the existing comment
+      in place rather than adding a new one on every push, because a bot that spams a
+      PR is a bot people mute.
+    required: false
+    default: "true"
+
+  cache:
+    description: >-
+      Persist run history between workflow runs using the Actions cache. Without this
+      the tool sees a single run and cannot detect anything, since flakiness is only
+      visible across runs.
+    required: false
+    default: "true"
+
+  cache-key:
+    description: "Cache key prefix. Change it to start history over."
+    required: false
+    default: "flaky-history"
+
+  db:
+    description: "Where run history is stored."
+    required: false
+    default: ".flaky.db"
+
+  ingest-only:
+    description: >-
+      Record this run's results without triaging or failing. Use on the default
+      branch to accumulate history, and leave it off for pull requests.
+    required: false
+    default: "false"
+
+  python-version:
+    description: "Python used to run the tool. Unrelated to the language under test."
+    required: false
+    default: "3.12"
+
+  upload-report:
+    description: "Upload an HTML report as a workflow artifact."
+    required: false
+    default: "true"
+
+outputs:
+  exit-code:
+    description: "0 clean, 1 flaky found, 2 regression or broken found, 3 usage error."
+    value: ${{ steps.triage.outputs.exit-code }}
+  actionable:
+    description: "Number of failures that need a human."
+    value: ${{ steps.triage.outputs.actionable }}
+  known-flakes:
+    description: "Number of failures matched to known flaky tests."
+    value: ${{ steps.triage.outputs.known-flakes }}
+  all-known-flaky:
+    description: "true when every failure in this run was an already-known flake."
+    value: ${{ steps.triage.outputs.all-known-flaky }}
+  summary:
+    description: "One-line human-readable verdict."
+    value: ${{ steps.triage.outputs.summary }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install flaky-test-detective
+      shell: bash
+      run: |
+        python -m pip install --quiet --upgrade pip
+        # github.action_path is this action's own checkout, so the tool is installed
+        # from the same commit the workflow pinned.
+        python -m pip install --quiet "${{ github.action_path }}"
+        flaky version
+
+    - name: Restore run history
+      if: inputs.cache == 'true'
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ inputs.db }}
+        key: ${{ inputs.cache-key }}-${{ github.run_id }}
+        restore-keys: |
+          ${{ inputs.cache-key }}-
+
+    - name: Ingest results
+      id: ingest
+      shell: bash
+      run: |
+        # Ingest is idempotent, so a re-run of this job cannot double-count.
+        flaky ingest "${{ inputs.report-path }}" --db "${{ inputs.db }}"
+
+    - name: Triage
+      id: triage
+      if: inputs.ingest-only != 'true'
+      shell: bash
+      run: |
+        set +e
+        flaky triage "${{ inputs.report-path }}" \
+          --db "${{ inputs.db }}" \
+          --format json \
+          --fail-on none > /tmp/flaky-triage.json
+        parse_status=$?
+        set -e
+
+        if [ "$parse_status" -ne 0 ]; then
+          echo "::error::Could not triage ${{ inputs.report-path }}"
+          echo "exit-code=3" >> "$GITHUB_OUTPUT"
+          exit 3
+        fi
+
+        actionable=$(python -c "import json;d=json.load(open('/tmp/flaky-triage.json'))['summary'];print(d['new_failures']+d['regressions'])")
+        known=$(python -c "import json;print(json.load(open('/tmp/flaky-triage.json'))['summary']['known_flakes'])")
+        all_known=$(python -c "import json;print(str(json.load(open('/tmp/flaky-triage.json'))['summary']['all_known_flaky']).lower())")
+        regressions=$(python -c "import json;print(json.load(open('/tmp/flaky-triage.json'))['summary']['regressions'])")
+
+        echo "actionable=$actionable"       >> "$GITHUB_OUTPUT"
+        echo "known-flakes=$known"          >> "$GITHUB_OUTPUT"
+        echo "all-known-flaky=$all_known"   >> "$GITHUB_OUTPUT"
+
+        if [ "$actionable" -gt 0 ]; then
+          summary="$actionable failure(s) need attention; $known known flake(s) set aside"
+        elif [ "$known" -gt 0 ]; then
+          summary="All $known failure(s) are known flakes; no new breakage"
+        else
+          summary="No failures"
+        fi
+        echo "summary=$summary" >> "$GITHUB_OUTPUT"
+        echo "$summary"
+
+        # Mirrors the CLI's documented exit codes.
+        code=0
+        if [ "$regressions" -gt 0 ] || [ "$actionable" -gt 0 ]; then
+          code=2
+        elif [ "$known" -gt 0 ]; then
+          code=1
+        fi
+        echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+
+    - name: Render reports
+      if: inputs.ingest-only != 'true'
+      shell: bash
+      run: |
+        mkdir -p flaky-reports
+        flaky triage "${{ inputs.report-path }}" --db "${{ inputs.db }}" \
+          --format md --fail-on none > flaky-reports/triage.md || true
+        flaky report --db "${{ inputs.db }}" --format html \
+          --output flaky-reports/report.html || true
+        flaky report --db "${{ inputs.db }}" --format json \
+          --output flaky-reports/report.json || true
+        cat flaky-reports/triage.md >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Comment on the pull request
+      if: inputs.comment == 'true' && inputs.ingest-only != 'true' && github.event_name == 'pull_request'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        marker="<!-- flaky-test-detective -->"
+        body_file=/tmp/flaky-comment.md
+        { echo "$marker"; cat flaky-reports/triage.md; } > "$body_file"
+
+        # Find our previous comment by the hidden marker and edit it, so the thread
+        # does not fill up with one comment per push.
+        existing=$(gh api "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+          --jq "[.[] | select(.body | startswith(\"$marker\"))] | .[0].id // empty" || true)
+
+        if [ -n "$existing" ]; then
+          gh api --method PATCH "repos/${{ github.repository }}/issues/comments/$existing" \
+            -F body=@"$body_file" > /dev/null
+          echo "Updated existing comment $existing"
+        else
+          gh api --method POST "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+            -F body=@"$body_file" > /dev/null
+          echo "Posted a new comment"
+        fi
+
+    - name: Upload reports
+      if: inputs.upload-report == 'true' && inputs.ingest-only != 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: flaky-reports
+        path: flaky-reports/
+        if-no-files-found: warn
+
+    - name: Save run history
+      if: inputs.cache == 'true' && always()
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ inputs.db }}
+        key: ${{ inputs.cache-key }}-${{ github.run_id }}
+
+    - name: Apply the failure policy
+      if: inputs.ingest-only != 'true'
+      shell: bash
+      run: |
+        code="${{ steps.triage.outputs.exit-code }}"
+        policy="${{ inputs.fail-on }}"
+
+        case "$policy" in
+          none)
+            echo "fail-on=none, reporting only (exit code would have been $code)"
+            ;;
+          flaky)
+            if [ "$code" -ne 0 ]; then
+              echo "::error::${{ steps.triage.outputs.summary }}"
+              exit "$code"
+            fi
+            ;;
+          regression|*)
+            # The default, and the point of the tool: known flakes must not block a
+            # merge, a real break must.
+            if [ "$code" -ge 2 ]; then
+              echo "::error::${{ steps.triage.outputs.summary }}"
+              exit "$code"
+            fi
+            echo "${{ steps.triage.outputs.summary }}"
+            ;;
+        esac

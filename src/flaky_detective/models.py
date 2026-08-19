@@ -299,6 +299,102 @@ class TriageReport:
         return self.total_failures > 0 and not self.actionable
 
 
+class Attribution(StrEnum):
+    """How much the recorded history can say about when flakiness started."""
+
+    INTRODUCED = "introduced"
+    """Divergence appears at a commit, with an observably clean commit before it."""
+
+    PREDATES_HISTORY = "predates_history"
+    """Divergence at the earliest recorded commit, so it began before the window."""
+
+    NO_DIVERGENCE = "no_divergence"
+    """Never both passed and failed at one commit, so there is nothing to attribute."""
+
+    NO_COMMIT_DATA = "no_commit_data"
+    """No run carried a commit SHA."""
+
+    TOO_SPARSE = "too_sparse"
+    """No commit ran the test more than once, so divergence was unobservable."""
+
+
+@dataclass(frozen=True, slots=True)
+class CommitWindow:
+    """One commit's outcomes for a single test."""
+
+    commit_sha: str
+    runs: int
+    passes: int
+    failures: int
+    first_seen: str | None = None
+
+    @property
+    def diverged(self) -> bool:
+        return self.passes > 0 and self.failures > 0
+
+    @property
+    def observable(self) -> bool:
+        """Could divergence have been seen here at all?
+
+        One run at a commit proves nothing either way, and reporting it as "did not
+        diverge" would imply evidence of stability that does not exist.
+        """
+        return self.runs > 1
+
+
+@dataclass(frozen=True, slots=True)
+class BlameResult:
+    """Where a test's flakiness appears to start, and how much to trust that."""
+
+    test_id: str
+    attribution: Attribution
+    commit_sha: str | None = None
+    previous_clean_sha: str | None = None
+    timeline: tuple[CommitWindow, ...] = ()
+    observable_commits: int = 0
+
+    @property
+    def is_actionable(self) -> bool:
+        return self.attribution is Attribution.INTRODUCED
+
+    @property
+    def explanation(self) -> str:
+        """Plain-language answer, including when there is no answer.
+
+        The unknowable cases get full sentences rather than a shrug, because naming a
+        commit the data does not implicate is how someone ends up reverting an
+        innocent change.
+        """
+        if self.attribution is Attribution.INTRODUCED:
+            return (
+                f"First divergence at {self.commit_sha}, the earliest commit where this "
+                f"test both passed and failed. The commit before it "
+                f"({self.previous_clean_sha}) ran more than once without diverging."
+            )
+        if self.attribution is Attribution.PREDATES_HISTORY:
+            return (
+                f"Already diverging at {self.commit_sha}, the earliest commit in the "
+                "recorded history. The flakiness began before this window, so no commit "
+                "here can be blamed for introducing it."
+            )
+        if self.attribution is Attribution.NO_DIVERGENCE:
+            return (
+                "No commit shows this test both passing and failing, so there is no "
+                "divergence to attribute. It may be flaky by flip rate alone, or it may "
+                "simply never have run twice on one commit."
+            )
+        if self.attribution is Attribution.TOO_SPARSE:
+            return (
+                "No commit ran this test more than once, so divergence could not have "
+                "been observed anywhere. Record more than one run per commit -- "
+                "`flaky hunt` does that -- and try again."
+            )
+        return (
+            "No run carried a commit SHA, so there is nothing to attribute flakiness "
+            "to. Ingest inside a git repository, or pass --commit."
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class DatabaseStats:
     """Summary of what a history database contains."""

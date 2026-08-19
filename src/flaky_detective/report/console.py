@@ -17,6 +17,7 @@ from rich.text import Text
 
 from ..models import (
     AnalysisReport,
+    BlameResult,
     Cause,
     DatabaseStats,
     FailureCluster,
@@ -492,3 +493,72 @@ def _date(value: str, *, with_time: bool = False) -> str:
     if not value:
         return ""
     return value[:16].replace("T", " ") if with_time else value[:10]
+
+
+def render_blame(result: BlameResult, console: Console | None = None) -> None:
+    """Print where a test's flakiness appears to start.
+
+    The unknowable cases get as much room as the answerable one. Pointing at a commit
+    the data does not implicate would be worse than admitting there is no answer.
+    """
+    out = console or Console()
+
+    out.print(result.test_id, style="bold")
+
+    if result.is_actionable:
+        out.print()
+        out.print(f"  First diverged at  {result.commit_sha}", style="bold yellow")
+        out.print(f"  Last clean commit  {result.previous_clean_sha}", style="green")
+        out.print()
+        out.print(
+            "  Look at what changed between those two commits.",
+            style="dim",
+        )
+    else:
+        out.print()
+        out.print(f"  No commit can be blamed: {result.attribution}", style="yellow")
+
+    out.print()
+    out.print(f"  {result.explanation}", style="dim")
+
+    if not result.timeline:
+        return
+
+    out.print()
+    table = Table(box=None, pad_edge=False, header_style="bold dim")
+    table.add_column("commit", width=14)
+    table.add_column("runs", justify="right", width=5)
+    table.add_column("pass", justify="right", width=5)
+    table.add_column("fail", justify="right", width=5)
+    table.add_column("diverged", width=9)
+    table.add_column("first seen", width=17)
+
+    for window in result.timeline:
+        if window.diverged:
+            marker = Text("yes", style="bold yellow")
+        elif window.observable:
+            marker = Text("no", style="green")
+        else:
+            # One run at this commit, so divergence could not have been seen. Saying
+            # "no" here would imply evidence of stability that does not exist.
+            marker = Text("unknown", style="dim")
+
+        table.add_row(
+            window.commit_sha[:12],
+            str(window.runs),
+            str(window.passes),
+            str(window.failures),
+            marker,
+            _date(window.first_seen or "", with_time=True),
+        )
+
+    out.print(table)
+
+    unobservable = sum(1 for w in result.timeline if not w.observable)
+    if unobservable:
+        out.print()
+        out.print(
+            f"  {unobservable} of {len(result.timeline)} commits ran this test only "
+            "once, so divergence could not have been observed there.",
+            style="dim",
+        )

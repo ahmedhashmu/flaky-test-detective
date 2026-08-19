@@ -63,6 +63,23 @@ def imports_of(path: Path) -> set[str]:
     return {name for name in found if name}
 
 
+def _internal_names() -> set[str]:
+    """Every name that refers to something inside this package.
+
+    Derived from the package layout rather than hardcoded, because a hardcoded list
+    goes stale the moment a module is added -- which is exactly what happened when
+    `benchmark/` landed and this test failed for the wrong reason.
+    """
+    names = {"flaky_detective"}
+    names |= {path.stem for path in PACKAGE.glob("*.py")}
+    names |= {
+        path.name
+        for path in PACKAGE.iterdir()
+        if path.is_dir() and not path.name.startswith(("_", "."))
+    }
+    return names
+
+
 def modules_in(subpackage: str) -> list[Path]:
     root = PACKAGE / subpackage if subpackage else PACKAGE
     return sorted(p for p in root.glob("*.py"))
@@ -154,20 +171,7 @@ class TestRuntimeDependencies:
                 continue
             if root in sys.stdlib_module_names:
                 continue
-            if root in {
-                "flaky_detective",
-                "analysis",
-                "report",
-                "ingest",
-                "models",
-                "normalize",
-                "storage",
-                "config",
-                "runner",
-                "quarantine",
-                "environment",
-                "cli",
-            }:
+            if root in _internal_names():
                 continue
             offenders.add(root)
 
@@ -275,7 +279,7 @@ class TestKiroHooks:
     def test_hooks_exist(self) -> None:
         assert self.hook_files(), "no hook files found"
 
-    def test_all_three_behaviours_are_present(self) -> None:
+    def test_every_expected_behaviour_is_present(self) -> None:
         names = {
             hook["name"]
             for path in self.hook_files()
@@ -284,6 +288,7 @@ class TestKiroHooks:
         assert names == {
             "Lint and format check on save",
             "Architecture guard",
+            "Accuracy guard",
             "Test after spec task",
         }
 
