@@ -28,6 +28,19 @@ flaky-report.html
 .idea/
 *.swp
 
+# Frontend
+web/node_modules/
+web/dist/
+web/.vite/
+web/tsconfig.tsbuildinfo
+npm-debug.log*
+
+# NOTE: src/flaky_detective/web/static/ is deliberately NOT ignored. Those are the
+# compiled dashboard assets, committed so that `flaky serve` works from a plain
+# `pip install` with no Node toolchain present. tests/test_web.py checks they are
+# present and current, so a stale bundle fails the build rather than rendering a
+# blank page.
+
 # NOTE: .kiro/ is deliberately NOT ignored. The specs, steering files, and hooks
 # are part of this project's record of how it was built, and the hackathon rules
 # require them to be present in the repository.

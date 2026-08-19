@@ -396,6 +396,105 @@ class BlameResult:
 
 
 @dataclass(frozen=True, slots=True)
+class RunRecord:
+    """Summary of one recorded run, for listings and duration statistics."""
+
+    run_uid: str
+    started_at: str
+    commit_sha: str | None = None
+    branch: str | None = None
+    runner: str = "unknown"
+    iteration: int | None = None
+    total: int = 0
+    failed: int = 0
+    skipped: int = 0
+    duration: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class HealthComponent:
+    """One contribution to the trust score, with its reasoning attached.
+
+    The score is only useful if every point it deducts can be traced to something
+    the user can go and look at. A single opaque number would be the same mistake
+    this tool exists to correct.
+    """
+
+    name: str
+    detail: str
+    penalty: float
+    """Points deducted. Zero means this component is healthy."""
+
+    weight: float = 0.0
+    """The most this component could ever deduct, so a reader can see its ceiling."""
+
+    @property
+    def is_healthy(self) -> bool:
+        return self.penalty == 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class TrustScore:
+    """How much the test suite can be believed right now, out of 100.
+
+    Built from figures already collected rather than from a fitted model, so it can
+    be explained line by line. `components` accounts for `deducted` exactly, and
+    `score` is that deduction subtracted from 100 and rounded to a whole number.
+    """
+
+    score: int
+    components: tuple[HealthComponent, ...]
+
+    total_tests: int = 0
+    stable_tests: int = 0
+    active_flakes: int = 0
+    unresolved_breaks: int = 0
+    commit_coverage: float = 0.0
+    quarantine_days_outstanding: int = 0
+
+    wasted_ci_seconds: float = 0.0
+    wasted_ci_is_estimate: bool = True
+    median_run_seconds: float = 0.0
+    flaky_failures: int = 0
+
+    @property
+    def band(self) -> str:
+        """A word for the number, so a reader does not have to invent thresholds."""
+        if self.score >= 90:
+            return "healthy"
+        if self.score >= 75:
+            return "fair"
+        if self.score >= 50:
+            return "poor"
+        return "critical"
+
+    @property
+    def stable_share(self) -> float:
+        return self.stable_tests / self.total_tests if self.total_tests else 0.0
+
+    @property
+    def wasted_ci_minutes(self) -> float:
+        return self.wasted_ci_seconds / 60
+
+    @property
+    def penalties(self) -> tuple[HealthComponent, ...]:
+        """Only the components actually costing points."""
+        return tuple(c for c in self.components if not c.is_healthy)
+
+    @property
+    def deducted(self) -> float:
+        """Points removed from 100, before the score is rounded and clamped.
+
+        Exposed so the headline number can be checked rather than believed: this is
+        the exact sum of the component penalties, and `score` is derived from it by
+        rounding. Without it, a reader adding up the displayed penalties would find
+        them up to half a point short of `100 - score` and have no way to tell
+        rounding from a fudge factor.
+        """
+        return sum(component.penalty for component in self.components)
+
+
+@dataclass(frozen=True, slots=True)
 class DatabaseStats:
     """Summary of what a history database contains."""
 

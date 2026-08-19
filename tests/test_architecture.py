@@ -138,6 +138,57 @@ class TestReportOnlyFormats:
         assert not offenders, f"{module.name} imports {offenders}"
 
 
+class TestWebIsAPresentationLayer:
+    """`web` serializes an analysis; it does not produce one or query for one.
+
+    The dashboard's whole claim is that it cannot show a verdict the terminal would
+    not. That holds only while every number it renders came from `analysis`, so the
+    same rule the reporters live under applies here, with one difference: `web` is
+    allowed to import `storage`, because something has to open the database. It is
+    not allowed to talk to SQLite itself.
+    """
+
+    @pytest.mark.parametrize("module", modules_in("web"), ids=lambda p: p.name)
+    def test_does_not_touch_sqlite(self, module: Path) -> None:
+        assert not {"sqlite3"} & imports_of(module)
+
+    @pytest.mark.parametrize("module", modules_in("web"), ids=lambda p: p.name)
+    def test_defines_no_scoring_constants(self, module: Path) -> None:
+        """Weights and thresholds live in `analysis`, in one place, or they drift.
+
+        A penalty ceiling copied into the payload builder would let the dashboard
+        and the CLI disagree about the same suite, which is the one failure this
+        layer is designed to make impossible.
+        """
+        tree = ast.parse(module.read_text(encoding="utf-8"), filename=str(module))
+        offenders = [
+            target.id
+            for node in tree.body
+            if isinstance(node, ast.Assign)
+            for target in node.targets
+            if isinstance(target, ast.Name)
+            and re.search(r"WEIGHT|PENALTY|THRESHOLD|SATURATION", target.id)
+        ]
+        assert not offenders, f"{module.name} defines {offenders}"
+
+    @pytest.mark.parametrize(
+        "subpackage", ["analysis", "report", "ingest", "benchmark", ""], ids=lambda s: s or "root"
+    )
+    def test_nothing_upstream_imports_web(self, subpackage: str) -> None:
+        """One-way direction. `cli` is the only module allowed to reach for it."""
+        for module in modules_in(subpackage):
+            if module.name == "cli.py":
+                continue
+            # Both spellings: `from ..web import api` resolves to "web", while
+            # `from . import web` in a root module resolves to the fully dotted name.
+            offenders = {
+                name
+                for name in imports_of(module)
+                if name.split(".")[0] == "web" or name == "flaky_detective.web"
+            }
+            assert not offenders, f"{module.name} imports {offenders}"
+
+
 class TestModelsAndNormalizeAreLeaves:
     """These two import nothing from the package, which is what lets everything
     else import them without a cycle."""
@@ -349,8 +400,11 @@ class TestKiroHooks:
             ("lint-on-save", "README.md", False),
             ("architecture-guard", "src/flaky_detective/analysis/flakiness.py", True),
             ("architecture-guard", "src/flaky_detective/report/console.py", True),
+            ("architecture-guard", "src/flaky_detective/web/api.py", True),
             ("architecture-guard", "src/flaky_detective/storage.py", False),
             ("architecture-guard", "tests/test_flakiness.py", False),
+            # The compiled bundle lives under web/ but is build output, not source.
+            ("architecture-guard", "src/flaky_detective/web/static/assets/index-abc.js", False),
         ],
     )
     def test_matchers_select_the_intended_files(

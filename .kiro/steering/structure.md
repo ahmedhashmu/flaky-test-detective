@@ -3,7 +3,7 @@
 ```
 flaky-test-detective/
 ├── .kiro/
-│   ├── specs/flaky-test-detective/   requirements, design, tasks
+│   ├── specs/                        three rounds: detector, accuracy, product layer
 │   ├── steering/                     product, tech, structure
 │   └── hooks/                        agent hooks
 ├── src/flaky_detective/
@@ -22,6 +22,7 @@ flaky-test-detective/
 │   │   ├── clustering.py  signature clustering
 │   │   ├── ordering.py    order-dependence detection
 │   │   ├── attribution.py blame: when flakiness started
+│   │   ├── health.py      trust score, wasted-CI-time estimate
 │   │   └── classify.py    root-cause heuristics
 │   ├── benchmark/         accuracy against ground truth
 │   │   ├── __init__.py    run_benchmark(), sweep()
@@ -35,13 +36,21 @@ flaky-test-detective/
 │   │   ├── markdown.py
 │   │   ├── json_report.py
 │   │   ├── html.py
+│   │   ├── issue.py       issue bodies and chat messages
 │   │   └── triage.py
+│   ├── web/               the dashboard
+│   │   ├── __init__.py    http.server routing, static assets, caching
+│   │   ├── api.py         JSON payloads, serialization only
+│   │   └── static/        compiled bundle, committed on purpose
 │   └── cli.py             typer app, exit codes
 ├── tests/
 │   ├── fixtures/          real JUnit XML from each runner
 │   └── test_*.py
 ├── examples/flaky_demo/   deliberately flaky suite, the tool's own fixture
+├── web/                   React 18 + MUI 6 source; builds into web/static above
+├── docs/                  architecture, scoring, accuracy, dashboard, ADRs
 ├── .github/workflows/
+├── action.yml             composite GitHub Action
 ├── pyproject.toml
 └── README.md
 ```
@@ -68,6 +77,16 @@ the caller does the query and passes the data in.
 
 `report` must not compute. If a reporter needs a derived number, it belongs in
 `analysis`, otherwise the console and markdown outputs will drift apart.
+
+`web` lives under the same rule, with one difference: it may import `storage`, because
+something has to open the database, but it must not touch `sqlite3` and it must not
+define a weight, threshold or penalty ceiling. The dashboard's whole claim is that it
+cannot show a verdict the terminal would not, and that holds only while every number it
+renders came out of `analysis`. Nothing upstream of `cli` may import `web`.
+
+`web/static/` is build output, committed deliberately so `flaky serve` works from a
+plain `pip install` with no Node toolchain. That is only safe while it is provably
+current, so CI rebuilds it and fails on any diff.
 
 ## Where things go
 
@@ -111,6 +130,8 @@ the streak requirement proportional to history cut the 5-run false-alarm rate fr
 ## Things that must not happen
 
 - `analysis/` importing `sqlite3`
-- `report/` computing a score
+- `report/` or `web/` computing a score
+- `analysis/`, `report/` or `benchmark/` importing `web/`
+- A third runtime dependency
 - Business logic in `cli.py` beyond argument handling and exit codes
 - The demo suite in `examples/` running as part of this project's test suite

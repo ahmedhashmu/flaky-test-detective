@@ -63,6 +63,110 @@ jobs:
       - name: Run tests
         run: uv run pytest -q --cov=flaky_detective --cov-report=term
 
+  dashboard:
+    name: Dashboard bundle is current
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pinned, not "latest": this job asserts the committed bundle byte-matches a
+      # fresh build, and asset hashes are only reproducible on the toolchain that
+      # produced them. package-lock.json pins the rest.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install
+        run: npm ci
+        working-directory: web
+
+      - name: Typecheck
+        run: npm run typecheck
+        working-directory: web
+
+      # The compiled bundle is committed so that `flaky serve` works from a plain
+      # `pip install` with no Node toolchain. That convenience is only safe if the
+      # committed bundle is provably the one this source produces, so rebuild it and
+      # require the tree to come back unchanged. A forgotten `npm run build` fails
+      # here instead of shipping a dashboard that renders stale data.
+      - name: Rebuild the committed bundle
+        run: npm run build
+        working-directory: web
+
+      # --porcelain rather than `git diff`, because a changed asset hash arrives as an
+      # untracked file plus a deletion, and `git diff` alone would miss the new file.
+      - name: The committed bundle must match the rebuild
+        run: |
+          changed=$(git status --porcelain -- src/flaky_detective/web/static/)
+          if [ -n "$changed" ]; then
+            echo "$changed"
+            echo "::error::src/flaky_detective/web/static/ does not match a fresh build."
+            echo "Run 'cd web && npm run build' and commit the result."
+            exit 1
+          fi
+          echo "Committed bundle matches the rebuild."
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # An end-to-end check that the server actually serves: real database, real
+      # analysis, real HTTP. A dashboard that only passes unit tests can still 500
+      # on the first request a judge makes.
+      - name: Serve a real database over HTTP
+        run: |
+          uv sync --python 3.12
+          uv run flaky hunt -n 8 --seed 3 --db dash.db -- \
+            uv run pytest examples/flaky_demo -p no:cacheprovider -q
+
+          uv run flaky serve --db dash.db --port 8420 --no-open --quiet &
+          server=$!
+          trap 'kill "$server" 2>/dev/null || true' EXIT
+
+          for _ in $(seq 1 40); do
+            curl -fsS http://127.0.0.1:8420/api/health >/dev/null 2>&1 && break
+            sleep 0.25
+          done
+
+          asset=$(python3 - <<'PY'
+          import pathlib, re
+          html = pathlib.Path("src/flaky_detective/web/static/index.html").read_text()
+          src = re.search(r'src="([^"]+\.js)"', html).group(1)
+          print("/" + src.removeprefix("./").lstrip("/"))
+          PY
+          )
+
+          # The three requests a browser makes, in the order it makes them.
+          for path in / "$asset" /api/overview; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:8420${path}")
+            echo "$path -> $code"
+            test "$code" = "200"
+          done
+
+          # Payloads must carry real analysis, not an empty shell.
+          curl -fsS http://127.0.0.1:8420/api/overview -o overview.json
+          python3 - <<'PY'
+          import json, pathlib
+
+          payload = json.loads(pathlib.Path("overview.json").read_text())
+          score = payload["trust"]
+          assert payload["tests"], "no tests in overview payload"
+          assert 0 <= score["score"] <= 100, score
+
+          # The score is only defensible if it is fully decomposed: the components must
+          # account for every point deducted, and the headline number must be nothing
+          # more than that deduction rounded.
+          penalties = sum(c["penalty"] for c in score["components"])
+          assert abs(penalties - score["deducted"]) < 0.05, (penalties, score["deducted"])
+          expected = max(0, min(100, round(100 - score["deducted"])))
+          assert score["score"] == expected, (score["score"], expected)
+
+          print(f"trust score {score['score']}/100 over {len(payload['tests'])} tests")
+          PY
+
   dogfood:
     name: Run the tool on itself
     runs-on: ubuntu-latest

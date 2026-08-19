@@ -17,13 +17,14 @@ gate and defaults to failing, because that is the entire point of it.
 from __future__ import annotations
 
 import os
+import threading
 from pathlib import Path
 from typing import Annotated
 
 import typer
 from rich.console import Console
 
-from . import __version__, runner
+from . import __version__, runner, web
 from . import report as report_module
 from .analysis import analyze as analyze_outcomes
 from .analysis import analyze_one
@@ -39,6 +40,7 @@ from .quarantine import EXPORT_FORMATS, Quarantine, recommend, verify
 from .quarantine import export as export_quarantine
 from .report import benchmark_report
 from .report import console as console_report
+from .report import issue as issue_report
 from .runner import HuntError
 from .storage import Storage, StorageError
 
@@ -470,6 +472,82 @@ def stats(db: DbOption = None, config: ConfigOption = None) -> None:
 
 
 @app.command()
+def serve(
+    port: Annotated[int, typer.Option("--port", "-p", help="Port to listen on.")] = 8420,
+    host: Annotated[
+        str,
+        typer.Option(
+            "--host",
+            help="Interface to bind. Defaults to loopback; anything else exposes your "
+            "test data to the network with no authentication.",
+        ),
+    ] = web.LOOPBACK,
+    open_browser: Annotated[
+        bool, typer.Option("--open/--no-open", help="Open a browser window.")
+    ] = True,
+    quiet: Annotated[bool, typer.Option("--quiet", help="Suppress request logging.")] = False,
+    db: DbOption = None,
+    config: ConfigOption = None,
+) -> None:
+    """Open the dashboard: a local, read-only view of your test history.
+
+    Answers "can I trust my CI right now" with a trust score, a ranked worklist, and a
+    per-test investigation page showing the evidence behind each verdict.
+    """
+    settings = _settings(config, db)
+
+    if not settings.db_path.is_file():
+        stderr.print(
+            f"No database at {settings.db_path}.\n"
+            "Record some runs first:\n"
+            "  flaky hunt -n 20 -- pytest tests/\n"
+            "  flaky ingest 'reports/**/*.xml'"
+        )
+        raise typer.Exit(EXIT_USAGE)
+
+    if not web.is_built():
+        stderr.print(
+            "The compiled dashboard is missing from this install.\n"
+            "Build it with:  cd web && npm ci && npm run build\n"
+            "Or use:         flaky report --format html --output flaky.html",
+            style="yellow",
+        )
+
+    try:
+        server = web.serve(settings, host=host, port=port, quiet=quiet)
+    except web.DashboardError as exc:
+        stderr.print(str(exc))
+        raise typer.Exit(EXIT_USAGE) from exc
+
+    url = f"http://{host}:{port}"
+    stdout.print(f"Dashboard on {url}", style="bold")
+    stdout.print(f"Reading {settings.db_path}  (read-only)", style="dim")
+
+    if host != web.LOOPBACK:
+        stderr.print(
+            f"\nWarning: bound to {host}, not loopback. There is no authentication, so "
+            "every test name, failure message and commit SHA in this database is now "
+            "readable by anyone who can reach this port.",
+            style="yellow",
+        )
+
+    stdout.print("Press Ctrl+C to stop.", style="dim")
+
+    if open_browser:
+        import webbrowser
+
+        # Threaded so a browser that blocks does not hold up the server.
+        threading.Timer(0.4, lambda: webbrowser.open(url)).start()
+
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        stdout.print("\nStopped.", style="dim")
+    finally:
+        server.server_close()
+
+
+@app.command()
 def blame(
     test_id: Annotated[str, typer.Argument(help="Full test id, or any part of one.")],
     db: DbOption = None,
@@ -488,6 +566,54 @@ def blame(
         outcomes = store.outcomes_for_test(resolved)
 
     console_report.render_blame(blame_test(resolved, outcomes), stdout)
+
+
+@app.command(name="issue")
+def issue_command(
+    test_id: Annotated[str, typer.Argument(help="Full test id, or any part of one.")],
+    fmt: Annotated[
+        str,
+        typer.Option("--format", "-f", help=f"One of: {', '.join(issue_report.FORMATS)}"),
+    ] = "markdown",
+    output: Annotated[
+        Path | None, typer.Option("--output", "-o", help="Write here instead of stdout.")
+    ] = None,
+    repository: Annotated[
+        str | None,
+        typer.Option("--repository", help="Repository URL, to build a compare link."),
+    ] = None,
+    db: DbOption = None,
+    config: ConfigOption = None,
+) -> None:
+    """Write an issue body or chat message for one test, from its real diagnosis.
+
+    Nothing is sent anywhere: the output goes to stdout for you to paste or pipe. That
+    keeps the tool free of credentials, which is worth more than a built-in API client.
+
+        flaky issue test_expects_clean_registry | gh issue create --body-file -
+        flaky issue test_expects_clean_registry -f slack | curl -d @- "$SLACK_WEBHOOK"
+    """
+    settings = _settings(config, db)
+
+    with _storage(settings) as store:
+        resolved = _resolve_test_id(store, test_id)
+        outcomes = store.outcomes_for_test(resolved)
+        all_outcomes = store.outcomes()
+
+    from .analysis.ordering import build_predecessor_index
+
+    analysis = analyze_one(
+        resolved, outcomes, settings, predecessors=build_predecessor_index(all_outcomes)
+    )
+    attribution = blame_test(resolved, outcomes)
+
+    try:
+        rendered = issue_report.render(analysis, attribution, fmt=fmt, repository=repository)
+    except ValueError as exc:
+        stderr.print(str(exc))
+        raise typer.Exit(EXIT_USAGE) from exc
+
+    _emit(rendered, output)
 
 
 @app.command()

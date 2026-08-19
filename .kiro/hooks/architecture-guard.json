@@ -4,8 +4,8 @@
     {
       "name": "Architecture guard",
       "trigger": "PostFileSave",
-      "description": "Enforces the dependency rules from .kiro/steering/structure.md when analysis or report modules change. analysis/ must never import sqlite3 or storage, and report/ must never compute a derived value. Both rules are easy to break under time pressure and expensive to unpick later, so they are checked the moment those directories are touched.",
-      "matcher": "src/flaky_detective/(analysis|report)/.*\\.py$",
+      "description": "Enforces the dependency rules from .kiro/steering/structure.md when analysis, report or web modules change. analysis/ must never import sqlite3 or storage; report/ must never compute a derived value; web/ must never define a weight or threshold of its own, because a penalty ceiling copied into the payload builder is how the dashboard and the terminal start disagreeing about the same suite. All three are easy to break under time pressure and expensive to unpick later, so they are checked the moment those directories are touched.",
+      "matcher": "src/flaky_detective/(analysis|report|web)/.*\\.py$",
       "timeout": 120,
       "action": {
         "type": "command",

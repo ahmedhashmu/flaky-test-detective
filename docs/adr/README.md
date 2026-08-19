@@ -17,6 +17,8 @@ what changed is the part that transfers.
 | [0006](0006-streak-beats-chance.md) | A failure streak must beat the test's own baseline | Accepted |
 | [0007](0007-measure-our-own-accuracy.md) | Measure accuracy against ground truth | Accepted |
 | [0008](0008-composite-github-action.md) | Ship a composite GitHub Action | Accepted |
+| [0009](0009-explainable-trust-score.md) | An explainable trust score, not a fitted index | Accepted |
+| [0010](0010-dashboard-on-the-standard-library.md) | Ship the dashboard in the package, on the standard library | Accepted |
 
 ## Format
 

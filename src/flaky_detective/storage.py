@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
 
-from .models import DatabaseStats, Status, TestOutcome, TestRun
+from .models import DatabaseStats, RunRecord, Status, TestOutcome, TestRun
 
 SCHEMA_VERSION = 1
 DEFAULT_DB_NAME = ".flaky.db"
@@ -445,7 +445,7 @@ class Storage:
             runners={str(r["runner"]): int(r["n"]) for r in runners},
         )
 
-    def recent_runs(self, limit: int = 20) -> list[dict[str, object]]:
+    def recent_runs(self, limit: int = 20) -> list[RunRecord]:
         rows = self._conn.execute(
             """
             SELECT run_uid, commit_sha, branch, started_at, runner, iteration,
@@ -456,7 +456,21 @@ class Storage:
             """,
             (limit,),
         ).fetchall()
-        return [dict(row) for row in rows]
+        return [
+            RunRecord(
+                run_uid=str(row["run_uid"]),
+                started_at=str(row["started_at"]),
+                commit_sha=row["commit_sha"],
+                branch=row["branch"],
+                runner=str(row["runner"] or "unknown"),
+                iteration=row["iteration"],
+                total=int(row["total"] or 0),
+                failed=int(row["failed"] or 0),
+                skipped=int(row["skipped"] or 0),
+                duration=row["duration"],
+            )
+            for row in rows
+        ]
 
 
 @contextmanager

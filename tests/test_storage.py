@@ -220,7 +220,20 @@ class TestStats:
     def test_recent_runs(self, store: Storage) -> None:
         store.add_run(build_run("a"))
         recent = store.recent_runs()
-        assert recent[0]["run_uid"] == "a"
+        assert recent[0].run_uid == "a"
+        assert recent[0].runner == "pytest"
+
+    def test_recent_runs_are_newest_first(self, store: Storage) -> None:
+        for index, uid in enumerate(["old", "middle", "new"]):
+            base = build_run(uid)
+            store.add_run(
+                Run(
+                    run_uid=uid,
+                    started_at=f"2026-08-{index + 1:02d}T00:00:00+00:00",
+                    outcomes=base.outcomes,
+                )
+            )
+        assert [record.run_uid for record in store.recent_runs()] == ["new", "middle", "old"]
 
 
 class TestMaintenance:

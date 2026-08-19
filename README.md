@@ -4,8 +4,11 @@
 [![Python 3.11–3.14](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue)](pyproject.toml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-**Find and diagnose flaky tests from the JUnit XML your test runner already produces —
-and know how often the answer is wrong.**
+**Your CI is red. Flaky Test Detective tells you which failure actually matters — and
+shows the evidence.**
+
+Works from the JUnit XML your test runner already produces. Measures its own accuracy, so
+you know how often the answer is wrong.
 
 ```
 score  verdict     runs      p/f  flips  commit  cause      test
@@ -20,10 +23,48 @@ flaky. That distinction is the whole point.
 
 ---
 
+## The dashboard
+
+```sh
+flaky serve
+```
+
+A local, read-only CI reliability command center on `http://127.0.0.1:8420`. It answers
+one question above the fold: **can I trust my CI right now?**
+
+**Overview** — a CI Trust Score out of 100 where every deducted point is attributed to a
+named component, headline counts, and a ranked table carrying the counts behind each
+verdict so a row can be checked without opening it.
+
+**Test investigation** — click any test for four things:
+
+| Section | Answers |
+|---|---|
+| **Evidence** | Why should I believe this verdict? |
+| **Timeline** | What happened, run by run, grouped by commit |
+| **Why** | What kind of bug is this, and what fixes it? |
+| **Action** | What do I run next? |
+
+The Evidence panel is the point. It splits **Proven by the detector** (same-commit
+divergence, runner-recorded retries, polluter correlation) from **Inferred, weaker** (flip
+rate, missing commit data) — because a measured fact and a pattern match must not look
+alike, or the weaker one borrows the authority of the stronger.
+
+The timeline outlines any commit where the test both passed and failed. That outline *is*
+the proof, so it is shown rather than described.
+
+React 18 + Material UI, served by `http.server` from the standard library — no new runtime
+dependencies, and the compiled bundle ships in the wheel so `flaky serve` works from a
+plain `pip install` with no Node toolchain. Read-only by design: actions are commands with
+a copy button, so nothing that changes state happens by accident.
+
+Full detail, including the trust-score arithmetic: **[docs/dashboard.md](docs/dashboard.md)**.
+
+
 ## Contents
 
-- [The problem](#the-problem) · [What's different](#whats-different) ·
-  [Measured accuracy](#measured-accuracy)
+- [The dashboard](#the-dashboard) · [The problem](#the-problem) ·
+  [What's different](#whats-different) · [Measured accuracy](#measured-accuracy)
 - [Install](#install) · [Quick start](#quick-start) ·
   [The command you'll use most](#the-command-youll-use-most)
 - [All commands](#all-commands) · [How it decides](#how-it-decides) ·
@@ -214,6 +255,7 @@ the evidence of itself to argue it is flaky.
 
 | Command | What it does |
 |---|---|
+| `flaky serve` | Open the dashboard: trust score, ranked tests, per-test investigation |
 | `flaky init` | Write a commented `.flaky.toml` and create the database |
 | `flaky ingest <paths…>` | Parse JUnit XML files, directories or globs |
 | `flaky hunt -- <cmd>` | Run a test command N times, recording every outcome |
@@ -222,6 +264,7 @@ the evidence of itself to argue it is flaky.
 | `flaky blame <test-id>` | Which commit introduced the flakiness |
 | `flaky merge <sources…>` | Pool history from other machines or CI shards |
 | `flaky benchmark` | Measure this tool's own accuracy |
+| `flaky issue <test-id>` | Issue body or Slack message from the real diagnosis |
 | `flaky report -f md\|json\|html` | Render for a PR, a script, or a browser |
 | `flaky history <test-id>` | One test's timeline, run by run |
 | `flaky stats` | What is in the database |
@@ -397,28 +440,35 @@ Stated plainly, because a tool about trustworthy signals should be honest about 
 Built with Kiro using its spec-driven workflow. `.kiro/` is the record, and it is worth
 reading rather than taking on trust.
 
-**Two specs, not one.** [`.kiro/specs/flaky-test-detective/`](.kiro/specs/flaky-test-detective/)
-built the detector: 37 numbered requirements, a design document, 20 tasks. Then a review of
-the finished tool exposed gaps that no extra test coverage would fix, and
-[`.kiro/specs/accuracy-and-adoption/`](.kiro/specs/accuracy-and-adoption/) addressed them —
-the tool could not prove its own accuracy, history could not be shared across machines, and
-CI adoption took too many steps. The second spec is the evidence that the workflow was used
-*iteratively* under new requirements, not once at the start.
+**Three specs, not one.** Each round started from a review of the finished previous one, so
+`.kiro/specs/` is a record of the workflow used *iteratively* under new requirements rather
+than once at the start.
+
+| Round | Spec | Started because |
+|---|---|---|
+| 1 | [`flaky-test-detective/`](.kiro/specs/flaky-test-detective/) | Nothing existed. 37 numbered requirements, a design document, 20 tasks. |
+| 2 | [`accuracy-and-adoption/`](.kiro/specs/accuracy-and-adoption/) | The tool could not prove its own accuracy, history could not be shared across machines, and CI adoption took too many steps. |
+| 3 | [`product-layer/`](.kiro/specs/product-layer/) | It was an impressive CLI. Its strongest capability — separating known flakes from genuine breakage — was one line of console output. |
+
+Each spec's `tasks.md` ends with a **"what the plan got wrong"** section. Those are the
+useful part: three rounds of requirements that were written confidently and then corrected
+by a measurement.
 
 **Steering shaped every file.** [`.kiro/steering/`](.kiro/steering/) holds three always-on
 documents: `product.md` (the "never cry wolf" principle and a fixed vocabulary),
 `tech.md` (XML safety, error-handling categories, parameterized SQL, determinism), and
 `structure.md` (the one-way dependency direction). Those are not decoration —
-[`tests/test_architecture.py`](tests/test_architecture.py) turns them into 60+ enforced
-assertions.
+[`tests/test_architecture.py`](tests/test_architecture.py) turns them into 113 enforced
+checks, so a rule broken under time pressure fails the build instead of quietly decaying.
 
 **Hooks.** [`.kiro/hooks/`](.kiro/hooks/): lint on save, an architecture guard that fires on
-any change under `analysis/` or `report/`, and the fast test suite after each spec task.
+any change under `analysis/`, `report/` or `web/`, an accuracy guard on the scoring rules,
+and the fast test suite after each spec task.
 
 ### The part worth actually looking at
 
 The most valuable thing Kiro did was **catch its own mistakes by measuring output against
-ground truth**. Five rules were written, tested, found wrong, and rewritten. All are
+ground truth**. Six rules were written, tested, found wrong, and rewritten. All are
 documented with the measurements in [`docs/adr/`](docs/adr/):
 
 1. **Order dependence, twice.** v1 flagged a purely random test as order-dependent. v2
@@ -438,6 +488,13 @@ documented with the measurements in [`docs/adr/`](docs/adr/):
    detector was perfect. Overlapping positions in generated data made "ran immediately
    before" arbitrary. The harness was measuring its own bug — which is why the generator is
    now tested as carefully as the scorer. → [ADR-0007](docs/adr/0007-measure-our-own-accuracy.md)
+6. **The trust score's headline claim was false**, and the README's own verification step
+   printed the proof: `58 = 57.6`. Penalties are shown to one decimal and the score is
+   rounded to a whole number, so the components did not visibly account for the deduction —
+   in the one metric whose entire justification is that it can be taken apart. The test
+   guarding it had `round()` wrapped around the assertion, so 642 tests were green while the
+   docs, the docstrings and the UI tooltip all claimed something untrue. →
+   [ADR-0009](docs/adr/0009-explainable-trust-score.md)
 
 A flaky test was also found in **this project's own suite**: CLI assertions searched for
 phrases in rich-formatted output, which wraps to the terminal, so `"DOCTYPE or ENTITY"`
@@ -460,7 +517,7 @@ uv sync
 Substitute `pip install -e ".[dev]"` for `uv sync` and drop the `uv run` prefixes to use
 pip instead.
 
-**1. Test suite** — 542 tests, about 7 seconds:
+**1. Test suite** — 654 tests, about 16 seconds:
 
 ```sh
 uv run pytest
@@ -495,7 +552,45 @@ Expect ~10 flaky tests, then check the three things that matter:
 - `test_expects_clean_registry` should be **order dependent**, naming
   `test_registers_session` as the polluter.
 
-**4. Triage**, the CI gate:
+**4. Open the dashboard** on the database you just built:
+
+```sh
+uv run flaky serve --db /tmp/demo.db
+```
+
+No `npm` step: the compiled bundle ships inside the package, and CI rebuilds it on every
+push to prove the committed copy is current. The server binds `127.0.0.1` and opens the
+database read-only.
+
+Check that the trust score is decomposed rather than asserted. The listed penalties sum to
+exactly the points deducted, and the headline number is that deduction rounded to a whole
+number — nothing else sits in between:
+
+```sh
+curl -s http://127.0.0.1:8420/api/overview | python3 -c "
+import json, sys
+t = json.load(sys.stdin)['trust']
+print('components sum :', round(sum(c['penalty'] for c in t['components']), 1))
+print('deducted       :', t['deducted'])
+print('score          :', t['score'], '==', round(100 - t['deducted']))"
+```
+
+Then click any flaky test. The investigation page separates **proven** evidence
+(same-commit divergence, runner-recorded retries, polluter correlation) from **inferred**
+signals (flip rate), because a pattern match must not borrow the authority of a
+measurement. Every number on the page comes from the same `analyze()` the CLI calls;
+`tests/test_web.py` asserts the payload verdicts match it exactly.
+
+**5. Export an issue body** for the tracker of your choice:
+
+```sh
+uv run flaky issue test_expects_clean_registry --db /tmp/demo.db -f markdown
+uv run flaky issue test_expects_clean_registry --db /tmp/demo.db -f slack
+```
+
+It prints; it never posts. There is no credential to supply and nothing leaves the machine.
+
+**6. Triage**, the CI gate:
 
 ```sh
 uv run pytest examples/flaky_demo -q --junitxml=/tmp/run.xml ; true
@@ -505,7 +600,7 @@ uv run flaky triage /tmp/run.xml --db /tmp/demo.db ; echo "exit: $?"
 Several tests failed; it should report only `test_known_broken` as needing attention, and
 exit 2.
 
-**5. Merge history from two machines:**
+**7. Merge history from two machines:**
 
 ```sh
 uv run flaky hunt -n 6 --db /tmp/a.db -- uv run pytest examples/flaky_demo -q
@@ -514,7 +609,7 @@ uv run flaky merge /tmp/b.db --into /tmp/a.db     # 12 runs
 uv run flaky merge /tmp/b.db --into /tmp/a.db     # no-op, idempotent
 ```
 
-**6. Verify the quarantine export really works:**
+**8. Verify the quarantine export really works:**
 
 ```sh
 uv run flaky quarantine recommend --db /tmp/demo.db --apply
@@ -525,7 +620,7 @@ PYTHONPATH=/tmp/qp uv run pytest examples/flaky_demo -p qplugin -q -rs
 Quarantined tests are reported as skipped with a reason. `test_known_broken` still fails,
 because quarantine never hides a real failure.
 
-**7. Confirm this project's own suite is not flaky** — a reasonable thing to demand of this
+**9. Confirm this project's own suite is not flaky** — a reasonable thing to demand of this
 particular tool:
 
 ```sh
@@ -554,6 +649,8 @@ access at any point.
 
 - [Typer](https://typer.tiangolo.com/) — CLI framework (MIT)
 - [Rich](https://rich.readthedocs.io/) — terminal formatting (MIT)
+- [React](https://react.dev/) 18 and [Material UI](https://mui.com/) 6 — dashboard (MIT)
+- [Vite](https://vite.dev/) and [TypeScript](https://www.typescriptlang.org/) — frontend build
 - [pytest](https://pytest.org/), [ruff](https://docs.astral.sh/ruff/),
   [mypy](https://mypy-lang.org/), [uv](https://docs.astral.sh/uv/) — development
 - [pytest-randomly](https://github.com/pytest-dev/pytest-randomly) — order randomization
@@ -570,12 +667,13 @@ fixtures were written to their documented formats, with provenance recorded in
 
 | Document | Contents |
 |---|---|
+| [docs/dashboard.md](docs/dashboard.md) | The web dashboard, trust score and API |
 | [docs/architecture.md](docs/architecture.md) | Pipeline, data model and verdict-flow diagrams |
 | [docs/scoring.md](docs/scoring.md) | The maths, and why each weight is what it is |
 | [docs/accuracy.md](docs/accuracy.md) | Precision and recall against ground truth |
 | [docs/ci-integration.md](docs/ci-integration.md) | Recipes, including sharded builds |
 | [docs/adr/](docs/adr/) | Decision records, including the ones that were wrong first |
-| [.kiro/specs/](.kiro/specs/) | Requirements, design and tasks for both rounds |
+| [.kiro/specs/](.kiro/specs/) | Requirements, design and tasks for all three rounds |
 
 ## License
 
