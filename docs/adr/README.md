@@ -23,6 +23,7 @@ what changed is the part that transfers.
 | [0012](0012-attribute-flakiness-to-a-branch.md) | Attribute flakiness to a branch, against the baseline's own uncertainty | Accepted |
 | [0013](0013-verify-fixes-against-three-conditions.md) | A fix is verified against three conditions, not one | Accepted |
 | [0014](0014-search-a-window-for-the-polluter.md) | Search a window for the polluter — and publish that it did not help on real code | **Accepted, negative result** |
+| [0015](0015-reproduce-by-experiment-not-correlation.md) | Reproduce by experiment, because correlation has a measured ceiling | Accepted |
 
 ## Format
 

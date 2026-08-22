@@ -31,6 +31,7 @@ flaky-test-detective/
 │   │   ├── realworld.py   scoring against published labels from real repos
 │   │   └── score.py       precision, recall, confusion matrix
 │   ├── runner.py          hunt: repeated execution
+│   ├── reproduce.py       delta debugging to a minimal failing sequence
 │   ├── quarantine.py      quarantine list and exporters
 │   ├── report/
 │   │   ├── __init__.py    render() and render_triage() format dispatch
@@ -40,6 +41,8 @@ flaky-test-detective/
 │   │   ├── html.py
 │   │   ├── issue.py       issue bodies and chat messages
 │   │   ├── comparison.py  what a branch introduced
+│   │   ├── verification.py  before, after, and whether to believe it
+│   │   ├── reproduction.py  the failing command and what it cost to find
 │   │   ├── validation.py  real-world accuracy against published labels
 │   │   └── benchmark_report.py
 │   ├── web/               the dashboard
@@ -64,8 +67,11 @@ flaky-test-detective/
 
 Strictly one way. `cli` → `report` → `analysis` → `storage` → `models`.
 
-`runner` and `benchmark` sit beside the pipeline as producers, feeding it rather than
-being called by it. `benchmark` depends on `analysis` being pure: it generates labelled
+`runner`, `reproduce`, `demo` and `benchmark` sit beside the pipeline as producers, feeding
+it rather than being called by it. `reproduce` is the one that runs the suite *while* asking
+a question rather than to collect history, so its search logic takes an injected oracle and
+never touches `subprocess` itself: the alternative is a test suite that needs hours and a
+real project to exercise a pure algorithm. `benchmark` depends on `analysis` being pure: it generates labelled
 `TestOutcome` lists and hands them to the real `analyze()`. If analysis ever needed a
 database, the harness would have to grow a parallel copy of the scoring, and would then
 be measuring something other than the shipped code.

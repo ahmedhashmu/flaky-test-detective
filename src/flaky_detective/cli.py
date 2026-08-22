@@ -27,6 +27,7 @@ from rich.console import Console
 
 from . import __version__, demo, runner, web
 from . import report as report_module
+from . import reproduce as reproducer
 from .analysis import analyze as analyze_outcomes
 from .analysis import analyze_one
 from .analysis import compare as compare_histories
@@ -38,7 +39,15 @@ from .benchmark import sweep as run_sweep
 from .config import EXAMPLE_CONFIG, Config, load_config
 from .environment import detect
 from .ingest import ingest_paths, junit
-from .models import AnalysisReport, FixOutcome, TestAnalysis, TestOutcome, Verdict
+from .models import (
+    AnalysisReport,
+    FixOutcome,
+    ReproduceOutcome,
+    Status,
+    TestAnalysis,
+    TestOutcome,
+    Verdict,
+)
 from .quarantine import EXPORT_FORMATS, Quarantine, recommend
 from .quarantine import export as export_quarantine
 from .quarantine import verify as verify_quarantine
@@ -46,6 +55,7 @@ from .report import benchmark_report
 from .report import comparison as comparison_report
 from .report import console as console_report
 from .report import issue as issue_report
+from .report import reproduction as reproduction_report
 from .report import validation as validation_report
 from .report import verification as verification_report
 from .runner import HuntError
@@ -710,6 +720,198 @@ def _polluter_exposures(
         before.order.likely_polluter,
         after_outcomes,
         build_ordering_index(after_outcomes),
+    )
+
+
+@app.command(
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def reproduce(
+    ctx: typer.Context,
+    test_id: Annotated[str, typer.Argument(help="Full test id, or any part of one.")],
+    trials: Annotated[
+        int,
+        typer.Option("-n", "--trials", help="Trials used to measure the control and the answer."),
+    ] = reproducer.DEFAULT_TRIALS,
+    search_trials: Annotated[
+        int,
+        typer.Option("--search-trials", help="Trials per experiment while searching."),
+    ] = reproducer.DEFAULT_SEARCH_TRIALS,
+    candidates: Annotated[
+        int,
+        typer.Option("--candidates", help="Most-suspect predecessors to start the search from."),
+    ] = reproducer.DEFAULT_CANDIDATES,
+    budget: Annotated[
+        int, typer.Option("--budget", help="Maximum experiments before the search gives up.")
+    ] = reproducer.DEFAULT_BUDGET,
+    timeout: Annotated[
+        int, typer.Option("--timeout", help="Seconds allowed for a single trial.")
+    ] = reproducer.DEFAULT_TRIAL_TIMEOUT,
+    fmt: Annotated[str, typer.Option("--format", "-f", help="console, md, or json.")] = "console",
+    output: Annotated[
+        Path | None, typer.Option("--output", "-o", help="Write here instead of stdout.")
+    ] = None,
+    db: DbOption = None,
+    config: ConfigOption = None,
+    threshold: ThresholdOption = None,
+) -> None:
+    """Turn a flaky test into a command that fails on demand.
+
+        flaky reproduce test_expects_clean_registry -- pytest
+
+    Correlation says "this test usually fails when `test_registers_session` ran earlier".
+    That is a lead, not an answer, and acting on it still means guessing which of the
+    tests that ran before it mattered. This runs the experiment instead: it measures how
+    often the test fails alone, then uses delta debugging to shrink the recorded
+    predecessors down to the smallest set that still makes it fail, and prints the
+    resulting command.
+
+    It costs real time, because it runs your suite many times. The estimate is printed
+    before it starts.
+
+    pytest only. Reproduction needs a runner that takes an ordered list of tests and
+    honours that order, and claiming support for others before measuring it would be a
+    guess dressed as a feature.
+    """
+    settings = _settings(config, db, threshold)
+    command = [arg for arg in ctx.args if arg != "--"]
+
+    if not command:
+        stderr.print(
+            "No test command given. Reproduction has to run your suite:\n"
+            f'  flaky reproduce "{test_id}" -- pytest'
+        )
+        raise typer.Exit(EXIT_USAGE)
+
+    with _storage(settings) as store:
+        resolved = _resolve_test_id(store, test_id)
+        all_outcomes = store.outcomes()
+
+    own_outcomes = _outcomes_for(all_outcomes, resolved)
+    if not own_outcomes:
+        stderr.print(f"{resolved} has no recorded runs, so there are no predecessors to try.")
+        raise typer.Exit(EXIT_USAGE)
+
+    from .analysis.ordering import build_ordering_index
+
+    analysis = analyze_one(
+        resolved, own_outcomes, settings, ordering=build_ordering_index(all_outcomes)
+    )
+    suspects = _reproduce_candidates(resolved, all_outcomes, analysis, limit=candidates)
+
+    problem = reproducer.check_command(command, cwd=Path.cwd())
+    if problem:
+        stderr.print(f"The test command does not look runnable: {problem}")
+        raise typer.Exit(EXIT_USAGE)
+
+    estimate = reproducer.estimate_cost(len(suspects), trials=trials, search_trials=search_trials)
+    # Progress goes to stderr: stdout may be JSON or Markdown, and interleaving search
+    # lines into it produced output no parser could read.
+    stderr.print(
+        f"Searching {len(suspects)} candidate predecessors of {resolved}.\n"
+        f"This will run your suite roughly {estimate} times."
+    )
+
+    try:
+        result = reproducer.reproduce(
+            resolved,
+            command,
+            suspects,
+            trials=trials,
+            search_trials=search_trials,
+            budget=budget,
+            cwd=Path.cwd(),
+            timeout=timeout,
+            progress=lambda line: stderr.print(line, style="dim"),
+        )
+    except reproducer.ReproduceError as exc:
+        stderr.print(str(exc))
+        raise typer.Exit(EXIT_USAGE) from exc
+
+    stderr.print()
+
+    if fmt == "console":
+        reproduction_report.render_console(result, stdout)
+    else:
+        try:
+            _emit(reproduction_report.render(result, fmt), output)
+        except ValueError as exc:
+            stderr.print(str(exc))
+            raise typer.Exit(EXIT_USAGE) from exc
+
+    if result.outcome is ReproduceOutcome.NOT_REPRODUCED:
+        raise typer.Exit(EXIT_FLAKY)
+    raise typer.Exit(EXIT_OK)
+
+
+def _outcomes_for(all_outcomes: list[TestOutcome], test_id: str) -> list[TestOutcome]:
+    return [o for o in all_outcomes if o.test_id == test_id]
+
+
+def _reproduce_candidates(
+    test_id: str,
+    all_outcomes: list[TestOutcome],
+    analysis: TestAnalysis,
+    *,
+    limit: int,
+) -> tuple[str, ...]:
+    """Pick which predecessors to hand the search, and in what order to run them.
+
+    Two different orderings are needed here and conflating them was the first thing that
+    went wrong. Candidates are *selected* by suspicion -- how often each one preceded an
+    actual failure -- but the search must *run* them in execution order, because "A before
+    B" is the hypothesis being tested and shuffling the selected set would measure a
+    different arrangement than the one the history recorded.
+
+    So: rank, truncate, then restore execution order.
+    """
+    by_run: dict[str, list[TestOutcome]] = {}
+    for outcome in all_outcomes:
+        if outcome.run_uid:
+            by_run.setdefault(outcome.run_uid, []).append(outcome)
+
+    preceded_failure: dict[str, int] = {}
+    appearances: dict[str, int] = {}
+    positions: dict[str, list[int]] = {}
+
+    for outcomes in by_run.values():
+        ordered = sorted(outcomes, key=lambda o: o.position if o.position is not None else 0)
+        victim = next((o for o in ordered if o.test_id == test_id), None)
+        if victim is None:
+            continue
+        victim_failed = victim.status in (Status.FAILED, Status.ERROR)
+        for index, outcome in enumerate(ordered):
+            if outcome.test_id == test_id:
+                break
+            appearances[outcome.test_id] = appearances.get(outcome.test_id, 0) + 1
+            positions.setdefault(outcome.test_id, []).append(index)
+            if victim_failed:
+                preceded_failure[outcome.test_id] = preceded_failure.get(outcome.test_id, 0) + 1
+
+    if not appearances:
+        return ()
+
+    polluter = analysis.order.likely_polluter if analysis.order else None
+
+    def suspicion(candidate: str) -> tuple[int, float, int, str]:
+        # Negatives sort descending. The named polluter goes first regardless: it is the
+        # detector's own best guess and putting it in the first chunk lets delta debugging
+        # confirm or discard it immediately rather than after several rounds.
+        first = 0 if candidate == polluter else 1
+        share = preceded_failure.get(candidate, 0) / appearances[candidate]
+        return (first, -share, -preceded_failure.get(candidate, 0), candidate)
+
+    ranked = sorted(appearances, key=suspicion)[: max(0, limit)]
+    selected = set(ranked)
+
+    return tuple(
+        sorted(
+            selected,
+            key=lambda c: (
+                sum(positions[c]) / len(positions[c]),
+                c,
+            ),
+        )
     )
 
 

@@ -90,8 +90,9 @@ Full detail, including the trust-score arithmetic: **[docs/dashboard.md](docs/da
   [Validated on real repositories](#validated-on-real-repositories)
 - [Install](#install) · [Quick start](#quick-start) ·
   [The command you'll use most](#the-command-youll-use-most)
-- [All commands](#all-commands) · [How it decides](#how-it-decides) ·
-  [CI integration](#ci-integration)
+- [All commands](#all-commands) ·
+  [`flaky reproduce` — from "it's flaky" to a failing command](#flaky-reproduce--from-its-flaky-to-a-failing-command) ·
+  [How it decides](#how-it-decides) · [CI integration](#ci-integration)
 - [Quarantine](#quarantine) · [Architecture](#architecture) ·
   [Limitations](#limitations)
 - [How Kiro was used](#how-kiro-was-used) ·
@@ -120,6 +121,13 @@ structured outcomes.
 **It looks for proof, not patterns.** The primary signal is *same-commit divergence*: one
 test, one commit SHA, both a pass and a fail. The code was byte-identical between those
 runs, so whatever varied, it was not the code. That is evidence, not inference.
+
+**It makes the test fail on demand.** Detection is the easy half. A flaky test nobody can
+reproduce is still unfixable, so `flaky reproduce` runs your suite against candidate subsets
+and delta-debugs them down to the smallest sequence that still breaks the test — then prints
+the command. On the demo suite: **15 candidate predecessors reduced to 1 in 7 experiments,
+12/12 failures in that order against 0/12 alone.** Not a correlation. A command you can
+paste.
 
 **It refuses to cry wolf.** A consistently failing test is reported as `broken` or
 `regression`, never flaky, because labelling a real break "flaky" teaches you to re-run
@@ -365,6 +373,7 @@ the evidence of itself to argue it is flaky.
 | `flaky analyze` | Ranked flakes with diagnosis |
 | `flaky triage <report>` | Known flakes vs new breakage for one run |
 | `flaky compare` | Did *this branch* introduce flakiness, or inherit it |
+| `flaky reproduce <test-id>` | Delta-debug the suite into a command that fails on demand |
 | `flaky verify <test-id>` | Prove a fix worked, or say why it cannot be proved yet |
 | `flaky blame <test-id>` | Which commit introduced the flakiness |
 | `flaky merge <sources…>` | Pool history from other machines or CI shards |
@@ -384,6 +393,58 @@ flaky merge shards/                                # every *.db in a directory
 flaky benchmark --sweep coverage                   # accuracy vs commit data
 flaky report -f html -o flaky.html                 # standalone page, no CDN
 ```
+
+### `flaky reproduce` — from "it's flaky" to a failing command
+
+The gap this closes is the expensive one. Knowing a test is order dependent still leaves
+you guessing which of the forty tests that ran before it mattered, and in what combination.
+This runs the experiment instead of inferring the answer.
+
+```sh
+flaky reproduce test_expects_clean_registry -- pytest
+```
+
+```
+Reproduced on demand
+
+Run this
+  pytest -p no:randomly
+    examples/flaky_demo/test_shared_state.py::test_registers_session
+    examples/flaky_demo/test_shared_state.py::test_expects_clean_registry
+
+15 candidates reduced to 1 in 7 suite experiments. It fails 12/12 times in this
+order and 0/12 times alone.
+
+Evidence
+  in this order     12/12 failed (100%)
+  alone (control)   0/12 failed (0%)
+  search            15 candidates reduced to 1
+  experiments       7
+  suite executions  45
+```
+
+Three things about how it works are the difference between evidence and a guess:
+
+- **The victim runs alone first.** That control rate is the baseline every later result must
+  beat on an exact binomial tail. Without it, a test that fails one time in three "reproduces"
+  under whatever prefix the search happened to be holding, and an innocent test gets named.
+- **It uses delta debugging**, not a linear scan, so it finds *conjunctions* — two tests that
+  only break the victim together. A one-at-a-time search reports nothing at all on those,
+  which looks exactly like no bug.
+- **The published rate comes from a fresh confirmation run**, not from the cheap trials used
+  during the search. A reduction that passed on 3 trials and fails over 20 is reported as not
+  reproduced, with the sequence still shown so you can check the claim.
+
+It answers honestly when there is nothing to isolate. A timing flake gets **fails on its
+own**, with its solo rate and no blamed neighbour; a stable test gets **not reproduced**.
+Both cost about
+a third of what a positive answer costs, because the search checks every candidate together
+once and stops when that changes nothing.
+
+This costs real time — it runs your suite tens of times, and prints the estimate before it
+starts. pytest only, for now: it needs a runner that takes an ordered list of tests and
+honours that order. Full reasoning, including what has *not* been measured, in
+**[ADR-0015](docs/adr/0015-reproduce-by-experiment-not-correlation.md)**.
 
 ### `flaky blame`
 
@@ -679,7 +740,7 @@ uv sync
 Substitute `pip install -e ".[dev]"` for `uv sync` and drop the `uv run` prefixes to use
 pip instead.
 
-**1. Test suite** — 817 tests, about 17 seconds:
+**1. Test suite** — 897 tests, about 17 seconds:
 
 ```sh
 uv run pytest
@@ -732,7 +793,43 @@ Expect ~10 flaky tests, then check the three things that matter:
 - `test_expects_clean_registry` should be **order dependent**, naming
   `test_registers_session` as the polluter.
 
-**5. Open the dashboard** on the database you just built:
+**5. Turn one of those flakes into a command that fails on demand.** This is the step that
+separates a detector from an investigation tool, and it takes about a minute:
+
+```sh
+uv run flaky reproduce test_expects_clean_registry --db /tmp/demo.db -n 12 -- \
+  uv run pytest
+```
+
+It measures the test alone first, then delta-debugs the recorded predecessors. Expect:
+
+- **Reproduced on demand**, with `15 candidates reduced to 1`.
+- The named test in the printed sequence is `test_registers_session` — the actual polluter,
+  which you can confirm by reading `examples/flaky_demo/test_shared_state.py`.
+- `12/12 failed` in that order against `0/12` alone.
+
+Then verify the tool's output independently, without the tool:
+
+```sh
+uv run pytest -p no:randomly \
+  examples/flaky_demo/test_shared_state.py::test_registers_session \
+  examples/flaky_demo/test_shared_state.py::test_expects_clean_registry   # 1 failed, 1 passed
+
+uv run pytest -p no:randomly \
+  examples/flaky_demo/test_shared_state.py::test_expects_clean_registry   # 1 passed
+```
+
+Now try one where there is nothing to isolate, which is the more important half:
+
+```sh
+uv run flaky reproduce test_worker_finishes_within_deadline --db /tmp/demo.db -n 12 -- \
+  uv run pytest
+```
+
+Expect **Fails on its own** and **no blamed neighbour**. That test is a timing race, and a
+search without a measured control would have happily named whichever test it was holding.
+
+**6. Open the dashboard** on the database you just built:
 
 ```sh
 uv run flaky serve --db /tmp/demo.db
@@ -761,7 +858,7 @@ signals (flip rate), because a pattern match must not borrow the authority of a
 measurement. Every number on the page comes from the same `analyze()` the CLI calls;
 `tests/test_web.py` asserts the payload verdicts match it exactly.
 
-**6. Export an issue body** for the tracker of your choice:
+**7. Export an issue body** for the tracker of your choice:
 
 ```sh
 uv run flaky issue test_expects_clean_registry --db /tmp/demo.db -f markdown
@@ -770,7 +867,7 @@ uv run flaky issue test_expects_clean_registry --db /tmp/demo.db -f slack
 
 It prints; it never posts. There is no credential to supply and nothing leaves the machine.
 
-**7. Prove it can tell whose fault flakiness is.** The demo suite ships a deterministic
+**8. Prove it can tell whose fault flakiness is.** The demo suite ships a deterministic
 mode, so the same tests can be recorded stable and then genuinely flaky — exactly the
 before/after a pull request creates:
 
@@ -797,7 +894,7 @@ Then three things worth checking, because they are where this is easy to get wro
 - Some tests land in "not enough evidence to attribute". That is the intended answer at 20
   runs a side, not a bug. Re-record the baseline with `-n 60` and watch them move.
 
-**8. Watch it refuse to certify a fix it cannot prove.** Record flaky history, then "fix"
+**9. Watch it refuse to certify a fix it cannot prove.** Record flaky history, then "fix"
 the tests by switching the demo suite to deterministic mode:
 
 ```sh
@@ -822,7 +919,7 @@ That refusal is the feature. A clean streak is only evidence in proportion to th
 is replacing, and for an order-dependent flake it is worth nothing at all unless the
 polluting order was actually exercised — which `verify` also counts.
 
-**9. Triage**, the CI gate:
+**10. Triage**, the CI gate:
 
 ```sh
 uv run pytest examples/flaky_demo -q --junitxml=/tmp/run.xml ; true
@@ -832,7 +929,7 @@ uv run flaky triage /tmp/run.xml --db /tmp/demo.db ; echo "exit: $?"
 Several tests failed; it should report only `test_known_broken` as needing attention, and
 exit 2.
 
-**10. Merge history from two machines:**
+**11. Merge history from two machines:**
 
 ```sh
 uv run flaky hunt -n 6 --db /tmp/a.db -- uv run pytest examples/flaky_demo -q
@@ -841,7 +938,7 @@ uv run flaky merge /tmp/b.db --into /tmp/a.db     # 12 runs
 uv run flaky merge /tmp/b.db --into /tmp/a.db     # no-op, idempotent
 ```
 
-**11. Verify the quarantine export really works:**
+**12. Verify the quarantine export really works:**
 
 ```sh
 uv run flaky quarantine recommend --db /tmp/demo.db --apply
@@ -852,7 +949,7 @@ PYTHONPATH=/tmp/qp uv run pytest examples/flaky_demo -p qplugin -q -rs
 Quarantined tests are reported as skipped with a reason. `test_known_broken` still fails,
 because quarantine never hides a real failure.
 
-**12. Confirm this project's own suite is not flaky** — a reasonable thing to demand of this
+**13. Confirm this project's own suite is not flaky** — a reasonable thing to demand of this
 particular tool:
 
 ```sh

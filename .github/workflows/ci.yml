@@ -237,6 +237,51 @@ jobs:
       - name: Analyze
         run: uv run flaky analyze --limit 30
 
+      # Part one and a half: the reproducer. Detection is checked above; this checks
+      # that the command the tool *prints* actually fails when something other than
+      # the tool runs it. That is the only assertion able to tell a reproducer from a
+      # plausible-looking guess, and a wrong one would be worse than none because it
+      # arrives dressed as proof.
+      - name: Reproduce a flake on demand
+        run: |
+          uv run flaky reproduce test_expects_clean_registry -n 12 \
+            --format json --output artifacts/reproduction.json -- uv run pytest
+
+          cat artifacts/reproduction.json
+
+          jq -e '.outcome == "reproduced"' artifacts/reproduction.json > /dev/null
+          jq -e '.sequence == ["examples/flaky_demo/test_shared_state.py::test_registers_session"]' \
+            artifacts/reproduction.json > /dev/null
+          jq -e '.control_failures == 0' artifacts/reproduction.json > /dev/null
+          jq -e '.failures == .trials' artifacts/reproduction.json > /dev/null
+
+          jq -r .command artifacts/reproduction.json > reproduce-command.sh
+          echo "Running what it printed:"
+          cat reproduce-command.sh
+
+          if sh reproduce-command.sh > /dev/null 2>&1; then
+            echo "FAIL: the printed command passed. A reproducer that does not reproduce"
+            echo "is a wrong answer wearing the costume of proof."
+            exit 1
+          fi
+          echo "The printed command fails on demand, as advertised."
+
+      # The other half of the claim, and the one that keeps it honest: a test that
+      # fails on its own must not have a neighbour blamed for it. Asserted as "not
+      # reproduced" rather than "fails alone" because a fast runner may not lose the
+      # race at all, and either answer is correct so long as nothing is blamed.
+      - name: A self-failing test gets no scapegoat
+        run: |
+          uv run flaky reproduce test_worker_finishes_within_deadline -n 12 \
+            --format json --output artifacts/reproduction-timing.json -- uv run pytest || true
+
+          cat artifacts/reproduction-timing.json
+
+          jq -e '.reproduced == false' artifacts/reproduction-timing.json > /dev/null
+          jq -e '.sequence == []' artifacts/reproduction-timing.json > /dev/null
+          jq -e '.command == ""' artifacts/reproduction-timing.json > /dev/null
+          echo "No neighbour blamed for a timing race."
+
       - name: Database summary
         run: uv run flaky stats
 

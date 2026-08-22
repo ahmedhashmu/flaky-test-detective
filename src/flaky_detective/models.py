@@ -585,6 +585,77 @@ regression to clear it and loose enough not to fire on noise.
 """
 
 
+class ReproduceOutcome(StrEnum):
+    """What an attempt to make a flaky test fail on demand achieved."""
+
+    REPRODUCED = "reproduced"
+    """A specific sequence of tests makes it fail, and the command is printed."""
+
+    FAILS_ALONE = "fails_alone"
+    """It fails on its own, so there is nothing to isolate. Repetition is the reproducer."""
+
+    NOT_REPRODUCED = "not_reproduced"
+    """Nothing tried made it fail. An honest answer, and a common one."""
+
+    BUDGET_EXHAUSTED = "budget_exhausted"
+    """The search ran out of trials before finishing. Partial progress is reported."""
+
+    UNSUPPORTED = "unsupported"
+    """The runner cannot be given an explicit list of tests to run, so the search
+    cannot be performed at all."""
+
+
+@dataclass(frozen=True, slots=True)
+class Reproduction:
+    """The result of trying to turn a flaky test into a repeatable failure.
+
+    The point of the whole exercise is the `command` field. "This test appears order
+    dependent" sends someone hunting; "run these two tests in this order and it fails 18
+    times in 20" sends them to a diff.
+    """
+
+    test_id: str
+    outcome: ReproduceOutcome
+
+    sequence: tuple[str, ...] = ()
+    """The minimal set of tests that, run before the victim, reproduces the failure."""
+
+    failures: int = 0
+    trials: int = 0
+    control_failures: int = 0
+    control_trials: int = 0
+
+    candidates_started: int = 0
+    """How many predecessors the search began with, before reduction."""
+
+    oracle_calls: int = 0
+    suite_runs: int = 0
+    """Total executions of the test command. The cost of the answer, reported because it
+    is substantial and a user deciding whether to run this deserves to know."""
+
+    command: str = ""
+    explanation: str = ""
+
+    @property
+    def reproduced(self) -> bool:
+        return self.outcome is ReproduceOutcome.REPRODUCED
+
+    @property
+    def failure_rate(self) -> float:
+        return self.failures / self.trials if self.trials else 0.0
+
+    @property
+    def control_rate(self) -> float:
+        return self.control_failures / self.control_trials if self.control_trials else 0.0
+
+    @property
+    def reduction(self) -> str:
+        """How much the candidate set shrank, which is the delta-debugging payoff."""
+        if not self.candidates_started or not self.sequence:
+            return ""
+        return f"{self.candidates_started} candidates reduced to {len(self.sequence)}"
+
+
 class FixOutcome(StrEnum):
     """Whether a candidate fix can be believed.
 

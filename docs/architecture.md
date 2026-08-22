@@ -10,6 +10,7 @@ flowchart LR
     subgraph producers["Producers"]
         runner["runner.py<br/><i>hunt: run N times</i>"]
         ci["CI artifacts<br/><i>JUnit XML</i>"]
+        reproduce["reproduce.py<br/><i>ddmin: minimal failing sequence</i>"]
     end
 
     subgraph ingestion["Ingestion"]
@@ -44,6 +45,8 @@ flowchart LR
     storage --> analysis
     analysis --> outputs
     analysis --> quarantine
+    analysis -.->|"suspects"| reproduce
+    reproduce --> outputs
     benchmark -.->|"generates<br/>labelled data"| analysis
 
     classDef pure fill:#e8f5e9,stroke:#2e7d32
@@ -52,7 +55,14 @@ flowchart LR
     class storage,junit,ci io
 ```
 
-The dashed arrow is worth noticing: the benchmark feeds generated data straight into
+`reproduce.py` is the one producer that runs the suite to *answer a question* rather than
+to collect history, and it is the only place where the tool's output is verified by
+experiment instead of inference. Its search takes an injected oracle, so `ddmin` itself
+never touches a subprocess and the whole algorithm is pinned by tests that run in a tenth
+of a second. See
+[ADR-0015](adr/0015-reproduce-by-experiment-not-correlation.md).
+
+The dashed arrow from `benchmark` is worth noticing: it feeds generated data straight into
 `analysis`, bypassing storage entirely. That is possible only because the analysis
 layer is pure, and it is what lets accuracy be measured against the real scoring code
 rather than a reimplementation of it.
@@ -65,8 +75,8 @@ One way, no exceptions:
 cli → report → analysis → storage → models
 ```
 
-`runner` and `benchmark` sit beside the pipeline as producers, feeding it rather than
-being called by it.
+`runner`, `reproduce`, `demo` and `benchmark` sit beside the pipeline as producers, feeding
+it rather than being called by it.
 
 Three rules hold this together, and all three are enforced by
 [`tests/test_architecture.py`](../tests/test_architecture.py) rather than left as
