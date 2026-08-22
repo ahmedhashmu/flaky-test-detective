@@ -22,6 +22,7 @@ from ..models import (
 from .classify import classify, remediation_for
 from .clustering import cluster_failures
 from .comparison import compare
+from .correlation import LabelIndex, detect_environment_association
 from .flakiness import analyze_test
 from .ordering import (
     OrderingIndex,
@@ -38,13 +39,19 @@ __all__ = [
     "classify",
     "cluster_failures",
     "compare",
+    "detect_environment_association",
     "detect_order_dependence",
     "remediation_for",
     "triage",
 ]
 
 
-def analyze(outcomes: list[TestOutcome], config: Config | None = None) -> AnalysisReport:
+def analyze(
+    outcomes: list[TestOutcome],
+    config: Config | None = None,
+    *,
+    labels: LabelIndex | None = None,
+) -> AnalysisReport:
     """Score every test in the given outcomes and cluster their failures."""
     settings = config or Config()
     considered = _apply_ignores(outcomes, settings.ignore)
@@ -58,7 +65,9 @@ def analyze(outcomes: list[TestOutcome], config: Config | None = None) -> Analys
 
     analyses: list[TestAnalysis] = []
     for test_id, test_outcomes in by_test.items():
-        analyses.append(analyze_one(test_id, test_outcomes, settings, ordering=ordering))
+        analyses.append(
+            analyze_one(test_id, test_outcomes, settings, ordering=ordering, labels=labels)
+        )
 
     # Sort by score, then test_id. The explicit tiebreaker keeps output stable
     # between runs when scores tie, which they often do at 0.0.
@@ -83,6 +92,7 @@ def analyze_one(
     config: Config | None = None,
     *,
     ordering: OrderingIndex | None = None,
+    labels: LabelIndex | None = None,
 ) -> TestAnalysis:
     """Analyze a single test, including diagnosis.
 
@@ -103,7 +113,12 @@ def analyze_one(
     messages = [o.message or "" for o in outcomes if o.status.is_failure or o.retried]
     cause = classify(messages, order) if (messages or order) else None
 
-    return replace(analysis, order=order, cause=cause)
+    # An association with the environment is a measured fact about *where* a test fails,
+    # not a guess about why, so it is computed independently of the cause heuristic and
+    # never feeds back into the verdict.
+    environment = detect_environment_association(outcomes, labels)
+
+    return replace(analysis, order=order, cause=cause, environment=environment)
 
 
 def triage(

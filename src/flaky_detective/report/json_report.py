@@ -96,10 +96,31 @@ def _test_to_dict(test: TestAnalysis) -> dict[str, Any]:
                 "mean_position_on_pass": test.order.mean_position_on_pass,
                 "likely_polluter": test.order.likely_polluter,
                 "polluter_failure_share": test.order.polluter_failure_share,
+                "polluter_distance": test.order.polluter_distance,
+                "polluter_lift": test.order.polluter_lift,
+                "polluter_observations": test.order.polluter_observations,
+                "candidates_considered": test.order.candidates_considered,
             }
             if test.order
             else None
         ),
+        "environment": [
+            {
+                "dimension": association.dimension,
+                "value": association.value,
+                "failures": association.failures,
+                "runs": association.runs,
+                "failure_rate": round(association.failure_rate, 4),
+                "other_failures": association.other_failures,
+                "other_runs": association.other_runs,
+                "other_rate": round(association.other_rate, 4),
+                "lift": association.lift,
+                "probability": association.probability,
+                "values_considered": association.values_considered,
+                "covaries_with": list(association.covaries_with),
+            }
+            for association in test.environment
+        ],
     }
 
 

@@ -276,16 +276,38 @@ def _evidence(test: TestAnalysis) -> dict[str, Any]:
             }
         )
     if test.order and test.order.likely_polluter:
+        distance = (
+            "immediately before it"
+            if test.order.polluter_distance <= 1
+            else f"about {test.order.polluter_distance:.0f} tests before it"
+        )
         proven.append(
             {
                 "label": "Polluter correlation",
                 "detail": (
                     f"Fails after {test.order.likely_polluter} in "
                     f"{test.order.polluter_failure_share:.0%} of its failures, more "
-                    "often than its own base failure rate explains."
+                    f"often than its own base failure rate explains. That test ran "
+                    f"{distance}, across {test.order.polluter_observations} runs, chosen "
+                    f"over {test.order.candidates_considered} candidates."
                 ),
             }
         )
+
+    for association in test.environment[:2]:
+        detail = (
+            f"Fails {association.lift:.0f} times more often where {association.summary}: "
+            f"{association.failures} of {association.runs} runs "
+            f"({association.failure_rate:.0%}) against {association.other_failures} of "
+            f"{association.other_runs} ({association.other_rate:.0%}) elsewhere."
+        )
+        if association.covaries_with:
+            detail += (
+                f" Indistinguishable from {', '.join(association.covaries_with)} in this "
+                "history: those are the same runs, so any of them could be the real "
+                "variable."
+            )
+        proven.append({"label": f"Environment: {association.summary}", "detail": detail})
 
     if test.flips:
         inferred.append(

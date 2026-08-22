@@ -23,7 +23,7 @@ import subprocess
 import tempfile
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from .analysis import analyze
@@ -405,7 +405,9 @@ def _collect_report(
     if not runs:
         return None, "; ".join(errors) or "no parseable report"
 
-    merged = _merge_runs(runs, iteration=index, seed=seed)
+    # Labels are attached here rather than in the parser: `junit.parse_file` reads a file
+    # and should not know what machine it is running on.
+    merged = replace(_merge_runs(runs, iteration=index, seed=seed), labels=env.labels)
     return merged, "; ".join(errors) or None
 
 

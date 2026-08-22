@@ -181,6 +181,14 @@ def ingest(
     run_id: Annotated[
         str | None, typer.Option("--run-id", help="CI run identifier. Overrides detection.")
     ] = None,
+    label: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--label",
+            help="Environment label as key=value. Repeatable. Overrides detection, and the "
+            "way to record the real environment when ingesting artifacts from elsewhere.",
+        ),
+    ] = None,
 ) -> None:
     """Parse JUnit XML and add it to the history.
 
@@ -188,7 +196,9 @@ def ingest(
     duplicates are skipped rather than double-counted.
     """
     settings = _settings(config, db)
-    env = detect().merged_with(commit_sha=commit, branch=branch, ci_run_id=run_id)
+    env = detect().merged_with(
+        commit_sha=commit, branch=branch, ci_run_id=run_id, labels=_parse_labels(label)
+    )
 
     with _storage(settings) as store:
         result = ingest_paths(
@@ -197,6 +207,7 @@ def ingest(
             commit_sha=env.commit_sha,
             branch=env.branch,
             ci_run_id=env.ci_run_id,
+            labels=env.labels,
         )
 
     stdout.print(
@@ -1527,6 +1538,18 @@ def _resolve_test_id(store: Storage, fragment: str) -> str:
     return matches[0]
 
 
+def _parse_labels(values: list[str] | None) -> dict[str, str]:
+    """Turn repeated `--label key=value` into a mapping, or exit with guidance."""
+    labels: dict[str, str] = {}
+    for raw in values or []:
+        key, separator, value = raw.partition("=")
+        if not separator or not key.strip() or not value.strip():
+            stderr.print(f"--label must be key=value, not {raw!r}. For example: --label arch=arm64")
+            raise typer.Exit(EXIT_USAGE)
+        labels[key.strip()] = value.strip()
+    return labels
+
+
 def _settings(config: Path | None, db: Path | None, threshold: float | None = None) -> Config:
     try:
         settings = load_config(config)
@@ -1562,12 +1585,13 @@ def _analyze(
             raise typer.Exit(EXIT_USAGE)
 
         outcomes: list[TestOutcome] = store.outcomes(since=since, branch=branch, limit_runs=last)
+        labels = store.run_labels()
 
     if not outcomes:
         stderr.print("No runs matched those filters.")
         raise typer.Exit(EXIT_USAGE)
 
-    return analyze_outcomes(outcomes, settings)
+    return analyze_outcomes(outcomes, settings, labels=labels)
 
 
 def _exit_code(result: AnalysisReport, fail_on: str) -> int:

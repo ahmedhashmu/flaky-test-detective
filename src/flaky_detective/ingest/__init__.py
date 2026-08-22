@@ -10,6 +10,7 @@ PARSERS. Nothing downstream changes.
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Sequence
+from dataclasses import replace
 from pathlib import Path
 
 from ..models import IngestResult, TestRun
@@ -106,13 +107,23 @@ def ingest_paths(
     commit_sha: str | None = None,
     branch: str | None = None,
     ci_run_id: str | None = None,
+    labels: tuple[tuple[str, str], ...] = (),
 ) -> IngestResult:
-    """Parse and store every report found under the given paths."""
+    """Parse and store every report found under the given paths.
+
+    `labels` describe the environment these results came from, and it is worth being precise
+    about what that means when ingesting downloaded artifacts: they describe *this* machine,
+    not the machines the reports were produced on. For a matrix build, ingest on each leg and
+    merge, or pass `--label` explicitly. Recording one machine's labels against another's
+    runs would make every environment comparison wrong while looking entirely plausible.
+    """
     files = expand_paths(paths)
     if not files:
         return IngestResult(failures=(("(no input)", "no XML files matched"),))
 
     runs, failures = parse_paths(files, commit_sha=commit_sha, branch=branch, ci_run_id=ci_run_id)
+    if labels:
+        runs = [replace(run, labels=labels) for run in runs]
 
     added = skipped = results = 0
     for run in runs:

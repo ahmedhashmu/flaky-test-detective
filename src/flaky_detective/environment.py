@@ -11,6 +11,7 @@ the fields come back None and the analysis falls back to flip rate alone.
 from __future__ import annotations
 
 import os
+import platform
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -27,20 +28,40 @@ class Environment:
     branch: str | None = None
     ci_run_id: str | None = None
     provider: str | None = None
+    labels: tuple[tuple[str, str], ...] = ()
+    """Machine and toolchain properties, as sorted key/value pairs.
+
+    A tuple of pairs rather than a dict so `Environment` stays frozen and hashable, and
+    sorted so a recorded run is byte-identical given the same machine.
+
+    Deliberately open-ended: `os`, `arch`, `python`, `cpus`, `ci` today, and anything a
+    project adds with `--label`. A test that fails only on ARM, or only at parallelism 8,
+    or only against one dependency version, is a test whose failures have a place to be
+    reproduced -- and the dimensions worth recording differ enough per project that a
+    fixed column list would be wrong for most of them.
+    """
 
     def merged_with(
         self,
         commit_sha: str | None = None,
         branch: str | None = None,
         ci_run_id: str | None = None,
+        labels: dict[str, str] | None = None,
     ) -> Environment:
         """Explicit values win over anything detected."""
+        combined = dict(self.labels)
+        combined.update(labels or {})
         return Environment(
             commit_sha=commit_sha or self.commit_sha,
             branch=branch or self.branch,
             ci_run_id=ci_run_id or self.ci_run_id,
             provider=self.provider,
+            labels=tuple(sorted(combined.items())),
         )
+
+    @property
+    def label_map(self) -> dict[str, str]:
+        return dict(self.labels)
 
 
 # Provider -> (env var for run id, env var for branch, env var for sha).
@@ -72,7 +93,58 @@ def detect(cwd: Path | None = None) -> Environment:
         branch=ci.branch or git.branch,
         ci_run_id=ci.ci_run_id,
         provider=ci.provider,
+        labels=tuple(sorted(_detect_labels(ci.provider).items())),
     )
+
+
+def _detect_labels(provider: str | None) -> dict[str, str]:
+    """Machine and toolchain properties worth correlating failures against.
+
+    Cheap and local: `platform` and a couple of environment variables, no subprocesses.
+    Recorded on every run so that pooling history across machines -- which `flaky merge`
+    already makes possible -- turns into a question the tool can answer.
+
+    Only the runtime running *this tool* is recorded, not the suite's. For a Python suite
+    they are the same; for a jest suite the `python` label describes the wrong thing, so it
+    is named `tool_python` to avoid quietly implying otherwise.
+    """
+    labels = {
+        "os": platform.system().lower() or "unknown",
+        "arch": platform.machine().lower() or "unknown",
+        "tool_python": platform.python_version(),
+    }
+
+    if cpus := os.cpu_count():
+        labels["cpus"] = str(cpus)
+    if provider:
+        labels["ci"] = provider
+
+    # Matrix and shard identifiers, where the provider exposes them. These are the
+    # dimensions most likely to explain a failure that only happens "sometimes in CI".
+    for key, variables in _LABEL_VARIABLES.items():
+        for variable in variables:
+            if value := _clean(os.environ.get(variable)):
+                labels[key] = value
+                break
+
+    return labels
+
+
+_LABEL_VARIABLES: dict[str, tuple[str, ...]] = {
+    "runner_image": ("ImageOS", "RUNNER_IMAGE", "AGENT_OS"),
+    "shard": ("FLAKY_SHARD", "CI_NODE_INDEX", "CIRCLE_NODE_INDEX", "BUILDKITE_PARALLEL_JOB"),
+    "parallelism": (
+        "FLAKY_PARALLELISM",
+        "CI_NODE_TOTAL",
+        "CIRCLE_NODE_TOTAL",
+        "BUILDKITE_PARALLEL_JOB_COUNT",
+    ),
+}
+"""Where each label is read from, first match winning.
+
+`FLAKY_*` first so a project can always override what was detected, which matters because
+provider variables change and a wrong shard label is worse than no shard label.
+"""
 
 
 def _detect_ci() -> Environment:

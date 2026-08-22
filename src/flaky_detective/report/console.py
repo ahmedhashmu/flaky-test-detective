@@ -221,8 +221,13 @@ def _render_diagnosis(tests: list[TestAnalysis], out: Console) -> None:
         t
         for t in tests
         if t.verdict is Verdict.FLAKY
-        and t.cause is not None
-        and (t.order is not None or t.cause.cause is not Cause.ASSERTION)
+        and (
+            t.environment
+            or (
+                t.cause is not None
+                and (t.order is not None or t.cause.cause is not Cause.ASSERTION)
+            )
+        )
     ][:5]
 
     if not interesting:
@@ -233,7 +238,27 @@ def _render_diagnosis(tests: list[TestAnalysis], out: Console) -> None:
 
     for test in interesting:
         out.print(f"  {_short(test.test_id)}", style="bold")
-        assert test.cause is not None
+
+        # An environment association leads when there is one: it is measured rather than
+        # guessed, and it tells the reader where to reproduce the failure.
+        for association in test.environment[:2]:
+            out.print(
+                f"    fails {association.lift:.0f}x more often on {association.summary}: "
+                f"{association.failures}/{association.runs} "
+                f"({association.failure_rate:.0%}) versus "
+                f"{association.other_failures}/{association.other_runs} "
+                f"({association.other_rate:.0%}) elsewhere",
+                style="cyan",
+            )
+            if association.covaries_with:
+                out.print(
+                    f"      indistinguishable from {', '.join(association.covaries_with)} "
+                    "in this history: those runs are the same runs",
+                    style="dim",
+                )
+
+        if test.cause is None:
+            continue
 
         if test.order is not None:
             # The polluter is the evidence the verdict rests on, so it leads.

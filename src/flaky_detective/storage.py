@@ -17,7 +17,7 @@ from types import TracebackType
 
 from .models import DatabaseStats, RunRecord, Status, TestOutcome, TestRun
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 DEFAULT_DB_NAME = ".flaky.db"
 
 _SCHEMA = """
@@ -62,8 +62,17 @@ CREATE INDEX IF NOT EXISTS idx_results_test    ON results(test_id);
 CREATE INDEX IF NOT EXISTS idx_results_run     ON results(run_id);
 CREATE INDEX IF NOT EXISTS idx_results_sig     ON results(signature);
 CREATE INDEX IF NOT EXISTS idx_results_status  ON results(status);
+CREATE TABLE IF NOT EXISTS run_labels (
+    run_id INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    key    TEXT NOT NULL,
+    value  TEXT NOT NULL,
+    PRIMARY KEY (run_id, key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_results_test    ON results(test_id);
 CREATE INDEX IF NOT EXISTS idx_runs_commit     ON runs(commit_sha);
 CREATE INDEX IF NOT EXISTS idx_runs_started    ON runs(started_at);
+CREATE INDEX IF NOT EXISTS idx_run_labels_key  ON run_labels(key, value);
 """
 
 _OUTCOME_COLUMNS = """
@@ -141,6 +150,17 @@ class Storage:
                 f"understands {SCHEMA_VERSION}. Upgrade flaky-test-detective."
             )
 
+        if found < SCHEMA_VERSION:
+            # Every migration so far has been additive, and `_SCHEMA` runs with CREATE
+            # TABLE IF NOT EXISTS, so replaying it is the whole upgrade: older databases
+            # gain the new tables and keep every recorded run. Nothing is rewritten, which
+            # matters because a history is not reproducible if it is lost.
+            self._conn.execute(
+                "UPDATE meta SET value = ? WHERE key = 'schema_version'",
+                (str(SCHEMA_VERSION),),
+            )
+            self._conn.commit()
+
     # -- writes ---------------------------------------------------------------
 
     def add_run(self, run: TestRun) -> tuple[int, bool]:
@@ -181,6 +201,12 @@ class Storage:
             ),
         )
         run_id = int(cursor.lastrowid or 0)
+
+        if run.labels:
+            self._conn.executemany(
+                "INSERT OR REPLACE INTO run_labels (run_id, key, value) VALUES (?, ?, ?)",
+                [(run_id, key, value) for key, value in sorted(run.labels)],
+            )
 
         self._conn.executemany(
             """
@@ -296,6 +322,21 @@ class Storage:
                 new_uids,
             )
             results_added = cursor.rowcount
+
+            # Labels travel with their runs. Merging is the main way a database comes to
+            # hold more than one environment, so dropping them here would delete the only
+            # thing that makes environment correlation answerable.
+            self._conn.execute(
+                f"""
+                INSERT OR REPLACE INTO main.run_labels (run_id, key, value)
+                SELECT target.id, l.key, l.value
+                FROM src.run_labels AS l
+                JOIN src.runs AS s ON s.id = l.run_id
+                JOIN main.runs AS target ON target.run_uid = s.run_uid
+                WHERE s.run_uid IN ({placeholders})
+                """,  # noqa: S608 - only a generated list of ? placeholders is interpolated
+                new_uids,
+            )
             self._conn.commit()
         finally:
             self._conn.execute("DETACH DATABASE src")
@@ -392,6 +433,38 @@ class Storage:
         """  # noqa: S608 - interpolates only a module constant; test_id is bound
         rows = self._conn.execute(sql, (test_id,)).fetchall()
         return [_row_to_outcome(row) for row in rows]
+
+    def run_labels(self) -> dict[str, dict[str, str]]:
+        """Every run's environment labels, keyed by run_uid.
+
+        Returned as a separate mapping rather than attached to each outcome: analysis needs
+        it per run, and denormalizing it onto hundreds of thousands of outcome rows would
+        cost memory for no gain. The same reasoning as the predecessor index.
+        """
+        rows = self._conn.execute(
+            """
+            SELECT u.run_uid AS run_uid, l.key AS key, l.value AS value
+            FROM run_labels AS l
+            JOIN runs AS u ON u.id = l.run_id
+            ORDER BY u.run_uid, l.key
+            """
+        ).fetchall()
+
+        labels: dict[str, dict[str, str]] = {}
+        for row in rows:
+            labels.setdefault(row["run_uid"], {})[row["key"]] = row["value"]
+        return labels
+
+    def label_values(self) -> dict[str, dict[str, int]]:
+        """key -> value -> how many runs carried it. For reporting what was recorded."""
+        rows = self._conn.execute(
+            "SELECT key, value, COUNT(*) AS runs FROM run_labels GROUP BY key, value"
+        ).fetchall()
+
+        values: dict[str, dict[str, int]] = {}
+        for row in rows:
+            values.setdefault(row["key"], {})[row["value"]] = int(row["runs"])
+        return values
 
     def find_test_ids(self, fragment: str) -> list[str]:
         """Substring match on test id, for the history command's convenience."""

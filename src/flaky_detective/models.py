@@ -109,6 +109,13 @@ class TestRun:
     iteration: int | None = None
     seed: str | None = None
     duration: float | None = None
+    labels: tuple[tuple[str, str], ...] = ()
+    """Environment properties for this run, as sorted key/value pairs.
+
+    On the run rather than on each outcome: a large ingest allocates hundreds of thousands
+    of `TestOutcome` objects and one of these, so the memory belongs here. Analysis receives
+    them as a separate `run_uid -> labels` mapping for the same reason.
+    """
 
     @property
     def total(self) -> int:
@@ -163,6 +170,56 @@ class OrderEvidence:
 
 
 @dataclass(frozen=True, slots=True)
+class DimensionAssociation:
+    """A recorded property of the environment that a test's failures track.
+
+    "Fails on ARM 19 times in 23, and twice in 46 on x86" is a different kind of finding
+    from a timeout guess: it is measured, and it tells you where to reproduce. It is still
+    an association and not a mechanism -- ARM runners in a given fleet may also be slower
+    or busier -- so the counts travel with it and the wording never claims causation.
+    """
+
+    dimension: str
+    """The label key, for example `os`, `arch`, `python`, `shard`."""
+
+    value: str
+    failures: int
+    runs: int
+    other_failures: int
+    other_runs: int
+    lift: float
+    probability: float
+    values_considered: int = 0
+    """How many dimension/value pairs were tested, for the multiplicity correction."""
+
+    covaries_with: tuple[str, ...] = ()
+    """Other dimension=value labels that split these runs identically.
+
+    Recorded because confounding is the normal case, not the exception. If every ARM runner
+    in a fleet also has two CPUs, then `arch=arm64` and `cpus=2` describe exactly the same
+    set of runs and the data cannot tell them apart. Reporting both as separate findings
+    would invent a second cause; reporting only the first would hide a real alternative.
+    So they are reported together, named as indistinguishable.
+    """
+
+    @property
+    def is_confounded(self) -> bool:
+        return bool(self.covaries_with)
+
+    @property
+    def failure_rate(self) -> float:
+        return self.failures / self.runs if self.runs else 0.0
+
+    @property
+    def other_rate(self) -> float:
+        return self.other_failures / self.other_runs if self.other_runs else 0.0
+
+    @property
+    def summary(self) -> str:
+        return f"{self.dimension}={self.value}"
+
+
+@dataclass(frozen=True, slots=True)
 class CauseEvidence:
     """Which terms triggered a root-cause guess, so a human can overrule it."""
 
@@ -208,6 +265,12 @@ class TestAnalysis:
     representative_message: str | None = None
     cause: CauseEvidence | None = None
     order: OrderEvidence | None = None
+    environment: tuple[DimensionAssociation, ...] = ()
+    """Environment dimensions whose values this test's failures track, strongest first.
+
+    Empty is the normal case, and also what you get when every run came from one machine:
+    a dimension with a single observed value cannot explain anything.
+    """
 
     @property
     def failure_rate(self) -> float:
