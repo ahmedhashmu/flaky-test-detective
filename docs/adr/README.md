@@ -25,6 +25,7 @@ what changed is the part that transfers.
 | [0014](0014-search-a-window-for-the-polluter.md) | Search a window for the polluter — and publish that it did not help on real code | **Accepted, negative result** |
 | [0015](0015-reproduce-by-experiment-not-correlation.md) | Reproduce by experiment, because correlation has a measured ceiling | Accepted |
 | [0016](0016-assert-relationships-not-only-examples.md) | Assert relationships, not only examples | Accepted |
+| [0017](0017-windows-is-a-supported-platform.md) | Windows is a supported platform, and the test suite could not have told us | Accepted |
 
 ## Format
 

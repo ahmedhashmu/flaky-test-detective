@@ -728,8 +728,17 @@ exists to find, sitting in the tool.
 
 No credentials, no API keys, no network access, no paid services.
 
-Verified on macOS and Linux. On Windows, run these under WSL, or substitute any writable
-directory for `/tmp`.
+**Linux, macOS and Windows are all tested in CI**, natively — no WSL needed. The commands
+below use `/tmp` for scratch files, so on Windows either run them in Git Bash (which ships
+with Git for Windows and maps `/tmp`) or substitute any writable directory.
+
+What "tested" means here is narrower than a green test run, deliberately: pytest captures
+stdout through a UTF-8 buffer, so the failure that actually bites on Windows — a redirected
+console using the locale codepage, meeting the block characters in the verification bars —
+cannot show up in the suite at all. CI therefore also runs the installed console script
+with its output redirected and `PYTHONIOENCODING=cp1252`, on all three platforms, and
+checks the files come back as UTF-8 with LF endings. Details and the four defects this
+found in **[ADR-0017](docs/adr/0017-windows-is-a-supported-platform.md)**.
 
 ```sh
 git clone https://github.com/ahmedhashmu/flaky-test-detective

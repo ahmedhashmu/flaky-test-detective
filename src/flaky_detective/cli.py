@@ -17,6 +17,7 @@ gate and defaults to failing, because that is the entire point of it.
 from __future__ import annotations
 
 import os
+import sys
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -66,6 +67,51 @@ EXIT_FLAKY = 1
 EXIT_REGRESSION = 2
 EXIT_USAGE = 3
 
+
+def _force_utf8_streams() -> None:
+    """Make stdout and stderr UTF-8 with LF endings when they are not already.
+
+    On Windows, Python encodes stdout with the locale codepage whenever it is not an
+    interactive console -- which is every CI job and most documented uses of this tool,
+    since the README pipes and redirects throughout. cp1252 cannot represent the block
+    characters in the fix-verification bars or the status emoji in the Slack payload, so
+    `flaky verify > verify.log` and `flaky issue -f slack | curl -d @-` would raise
+    UnicodeEncodeError while the same commands worked when run interactively. That is the
+    worst shape a bug can have: green everywhere a developer looks, red only in the
+    pipeline.
+
+    LF is pinned for the same reason. Default newline translation would make a report
+    written on Windows differ byte for byte from the identical report written on Linux,
+    which silently breaks any checksum or diff across a mixed fleet.
+
+    Two deliberate constraints on how this is done.
+
+    **It runs from the command callback, not at import.** An earlier version called this at
+    module scope and broke this project's own test suite in a genuinely instructive way:
+    importing `cli` happens while pytest has `sys.stdout` replaced by its capture object,
+    and reconfiguring that stream detached the buffer pytest was still writing to. The
+    whole run produced no output at all and exited non-zero with nothing to read. Rich
+    resolves `sys.stdout` lazily when a `Console` has no explicit file, so deferring costs
+    nothing.
+
+    **It is a no-op when the stream is already UTF-8.** Which is every POSIX system, so
+    the common path touches nothing. Reconfiguring unconditionally is how the above
+    happened, and narrowing it to the case that needs it is a smaller blast radius than
+    guarding for every kind of stream a caller might supply.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        encoding = (getattr(stream, "encoding", "") or "").lower().replace("-", "")
+        if reconfigure is None or encoding in ("utf8", "utf8mb4"):
+            continue
+        try:
+            reconfigure(encoding="utf-8", newline="\n")
+        except (ValueError, OSError):
+            # Detached, closed, or not a text stream. A diagnostic here would be printed
+            # to the stream that just refused to be configured.
+            continue
+
+
 app = typer.Typer(
     name="flaky",
     help=(
@@ -100,6 +146,8 @@ def _configure() -> None:
     the command -- unhelpful for CI artifacts, and a reliable way to write a test
     that passes in one shell and fails in another.
     """
+    _force_utf8_streams()
+
     width = os.environ.get("COLUMNS", "")
     if width.isdigit() and int(width) > 0:
         for console in (stdout, stderr):

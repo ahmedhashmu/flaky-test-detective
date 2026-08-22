@@ -8,6 +8,7 @@ All schema DDL lives here. Bump SCHEMA_VERSION on any change.
 
 from __future__ import annotations
 
+import os
 import sqlite3
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
@@ -259,7 +260,7 @@ class Storage:
         source_path = Path(source)
         if not source_path.is_file():
             raise StorageError(f"No database at {source_path}")
-        if source_path.resolve() == self.path.resolve():
+        if _same_file(source_path, self.path):
             raise StorageError(f"Cannot merge {source_path} into itself")
 
         self._check_source_schema(source_path)
@@ -339,6 +340,11 @@ class Storage:
             )
             self._conn.commit()
         finally:
+            # Roll back before detaching. SQLite refuses DETACH while a transaction is
+            # open, so on the error path the DETACH would itself raise, replace the real
+            # exception, and leave `src` attached -- an open handle on the source file.
+            # On Windows that turns a failed merge into an undeletable database.
+            self._conn.rollback()
             self._conn.execute("DETACH DATABASE src")
 
         return MergeResult(
@@ -573,6 +579,23 @@ def _row_to_outcome(row: sqlite3.Row) -> TestOutcome:
         started_at=row["started_at"],
         iteration=row["iteration"],
     )
+
+
+def _same_file(left: Path, right: Path) -> bool:
+    """Whether two paths name the same file on disk.
+
+    `resolve()` equality is not enough. macOS and Windows are case-insensitive, so
+    `resolve()` on macOS follows symlinks without case-folding and `A.DB` compares
+    unequal to `a.db` while being the same file. `samefile` asks the filesystem, via
+    device and inode, so it is right on every platform this runs on.
+
+    Falls back to normalized-case string comparison when either path does not exist yet,
+    since `samefile` needs both to be present.
+    """
+    try:
+        return left.samefile(right)
+    except OSError:
+        return os.path.normcase(str(left.resolve())) == os.path.normcase(str(right.resolve()))
 
 
 def add_runs(store: Storage, runs: Iterable[TestRun]) -> tuple[int, int]:

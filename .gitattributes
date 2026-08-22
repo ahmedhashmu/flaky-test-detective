@@ -1,0 +1,22 @@
+# Keep the JUnit fixtures byte-for-byte as the runners produced them.
+#
+# GitHub's windows-latest image sets core.autocrlf=true, which would rewrite every
+# fixture's line endings on checkout. The steering rule is that each parser dialect needs
+# a *real* fixture file, because hand-written XML that happens to parse proves nothing
+# about Maven's actual output -- and a file git has reformatted is no longer that runner's
+# actual output either. `-text` disables all newline translation for these paths.
+*.xml -text
+tests/fixtures/** -text
+
+# Shell scripts must keep LF or they will not execute under sh on a Windows runner.
+*.sh text eol=lf
+
+# The compiled dashboard bundle is committed and CI fails on any diff against a
+# rebuild, so it must not be rewritten on checkout either.
+src/flaky_detective/web/static/** -text
+
+# Databases and archives are binary. Named explicitly rather than relying on
+# auto-detection, since a corrupted SQLite file fails in confusing ways.
+*.db binary
+*.zip binary
+*.png binary

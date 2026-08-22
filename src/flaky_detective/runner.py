@@ -17,6 +17,7 @@ Two things it deliberately does not do:
 
 from __future__ import annotations
 
+import atexit
 import os
 import shutil
 import subprocess
@@ -195,7 +196,13 @@ def plan_hunt(
                 "  flaky hunt --report-path target/surefire-reports -- mvn test\n"
                 "  flaky hunt --report-path report.xml -- ./run-tests.sh"
             )
-        base = workdir or Path(tempfile.mkdtemp(prefix="flaky-hunt-"))
+        if workdir is None:
+            base = Path(tempfile.mkdtemp(prefix="flaky-hunt-"))
+            # Only cleaned up when we created it. A caller-supplied workdir belongs to the
+            # caller, and deleting it would be a surprising thing for a hunt to do.
+            atexit.register(shutil.rmtree, base, ignore_errors=True)
+        else:
+            base = workdir
         resolved_report = base / "iteration.xml"
         report_is_directory = False
     else:

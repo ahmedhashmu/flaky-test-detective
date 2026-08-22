@@ -31,6 +31,7 @@ the kind of unbacked claim this project avoids.
 
 from __future__ import annotations
 
+import atexit
 import math
 import os
 import shutil
@@ -452,7 +453,17 @@ def _format_command(argv: Sequence[str], sequence: Sequence[str], test_id: str) 
 
 
 def _quote(part: str) -> str:
-    return f"'{part}'" if " " in part else part
+    """Quote one argument for the shell the user is actually standing in.
+
+    The printed command is this module's entire product, so quoting it for the wrong
+    shell makes the output useless in exactly the case where it matters -- a path with a
+    space in it. cmd.exe treats a single quote as a literal character, so the POSIX form
+    would produce an invocation that fails with a confusing error about a file named
+    `'C:\\My`.
+    """
+    if " " not in part:
+        return part
+    return f'"{part}"' if os.name == "nt" else f"'{part}'"
 
 
 def _subprocess_runner(
@@ -470,6 +481,11 @@ def _subprocess_runner(
     sequence, then the test under investigation, last.
     """
     workdir = Path(tempfile.mkdtemp(prefix="flaky-reproduce-"))
+    # Registered rather than removed inline: the directory has to outlive this function,
+    # since the closure below writes into it on every trial. Without this, one directory
+    # is left behind per invocation, which on a developer machine is a slow leak and in a
+    # container is noise in the layer.
+    atexit.register(shutil.rmtree, workdir, ignore_errors=True)
     report = workdir / "reproduce.xml"
 
     def execute(sequence: Sequence[str], trials: int) -> TrialBatch:

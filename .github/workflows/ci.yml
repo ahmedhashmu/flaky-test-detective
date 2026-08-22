@@ -10,9 +10,14 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  # Keep uv's downloads and the venv out of the way of the tool's own .flaky.db.
-  UV_CACHE_DIR: /tmp/.uv-cache
+# UV_CACHE_DIR was pinned to /tmp/.uv-cache here, to keep uv's downloads away from the
+# tool's own .flaky.db. It is gone because the test matrix now includes windows-latest,
+# where /tmp resolves to C:\tmp and the cache would be created at the drive root. The
+# obvious replacement, ${{ runner.temp }}, is not available in workflow-level env -- the
+# runner context only exists at step level -- and putting the cache inside
+# github.workspace would place it where the bundle-diff check looks. setup-uv already
+# chooses a correct per-platform location when enable-cache is on, so the right fix was to
+# stop overriding it.
 
 jobs:
   checks:
@@ -38,13 +43,23 @@ jobs:
       - name: Mypy
         run: uv run mypy
 
+  # Three operating systems, because "language agnostic" is a claim about other
+  # people's test suites and portability is a claim about ours. The full Python
+  # matrix runs on Linux; Windows and macOS run one version each, which is where
+  # platform bugs live rather than in a version difference. See ADR-0017.
   test:
-    name: Tests (Python ${{ matrix.python }})
-    runs-on: ubuntu-latest
+    name: Tests (${{ matrix.os }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest]
         python: ["3.11", "3.12", "3.13", "3.14"]
+        include:
+          - os: windows-latest
+            python: "3.12"
+          - os: macos-latest
+            python: "3.12"
     steps:
       - uses: actions/checkout@v4
 
@@ -62,6 +77,42 @@ jobs:
       # collection by `norecursedirs`, so it cannot break this job on its own.
       - name: Run tests
         run: uv run pytest -q --cov=flaky_detective --cov-report=term
+
+      # A green test run does NOT clear the encoding risk, and reading it that way would
+      # be a mistake. pytest replaces sys.stdout with a UTF-8 buffer, so the failure mode
+      # that matters -- a redirected, locale-codepage stdout meeting the block characters
+      # in the verification bars -- cannot appear from inside the suite. This step is the
+      # real thing: the shipped console script, output redirected to a file, with stdout
+      # forced to cp1252 so every platform exercises the Windows condition rather than
+      # only windows-latest.
+      - name: The CLI survives a redirected, non-UTF-8 stdout
+        shell: bash
+        env:
+          PYTHONIOENCODING: cp1252
+        run: |
+          uv run flaky demo --db demo.db --no-serve > demo.log 2>&1
+          uv run flaky analyze --db demo.db > analyze.log
+          uv run flaky report --db demo.db --format md > report.md
+          uv run flaky report --db demo.db --format json > report.json
+          uv run flaky issue --db demo.db --format slack \
+            "$(uv run flaky report --db demo.db --format json \
+              | python -c 'import json,sys; print(json.load(sys.stdin)["tests"][0]["test_id"])')" \
+            > issue.json
+          uv run flaky stats --db demo.db > stats.log
+
+          test -s analyze.log
+          test -s report.md
+          python -c "import json; json.load(open('report.json'))"
+          python -c "import json; json.load(open('issue.json'))"
+
+          # LF endings, so a report from a Windows runner byte-matches one from Linux.
+          python - <<'PY'
+          from pathlib import Path
+          for name in ("report.md", "report.json", "analyze.log"):
+              raw = Path(name).read_bytes()
+              assert b"\r\n" not in raw, f"{name} contains CRLF"
+          print("Redirected output is UTF-8 with LF endings on this platform.")
+          PY
 
   dashboard:
     name: Dashboard bundle is current

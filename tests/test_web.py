@@ -308,6 +308,16 @@ class TestSecurity:
             "/../../etc/passwd",
             "/assets/../../../../etc/passwd",
             "/%2e%2e%2f%2e%2e%2fpyproject.toml",
+            # Windows forms. `\` is a path separator there, and a drive-absolute
+            # right-hand side makes pathlib's `/` DISCARD the left operand entirely,
+            # so `STATIC_ROOT / "C:/Windows/win.ini"` is just the Windows path. The
+            # containment check is the only thing standing between that and an
+            # arbitrary file read, which makes it worth asserting on every platform
+            # rather than only where it bites.
+            "/..\\pyproject.toml",
+            "/assets\\..\\..\\pyproject.toml",
+            "/C:/Windows/win.ini",
+            "/C:\\Windows\\win.ini",
         ],
     )
     def test_cannot_escape_the_asset_directory(self, client: str, attempt: str) -> None:
