@@ -25,7 +25,7 @@ from typing import Annotated
 import typer
 from rich.console import Console
 
-from . import __version__, runner, web
+from . import __version__, demo, runner, web
 from . import report as report_module
 from .analysis import analyze as analyze_outcomes
 from .analysis import analyze_one
@@ -874,6 +874,97 @@ def stats(db: DbOption = None, config: ConfigOption = None) -> None:
         console_report.render_stats(store.stats(), stdout)
 
 
+@app.command(name="demo")
+def demo_command(
+    db: Annotated[
+        Path | None,
+        typer.Option("--db", help="Where to write the demo history. Default: .flaky-demo.db"),
+    ] = None,
+    seed: Annotated[
+        int, typer.Option("--seed", help="Makes the demo database reproducible.")
+    ] = demo.DEFAULT_SEED,
+    runs: Annotated[int, typer.Option("--runs", help="Runs of history to generate.")] = (
+        demo.DEFAULT_RUNS
+    ),
+    open_browser: Annotated[
+        bool, typer.Option("--open/--no-open", help="Open the dashboard when it is ready.")
+    ] = True,
+    port: Annotated[int, typer.Option("--port", "-p", help="Port for the dashboard.")] = 8420,
+    serve_it: Annotated[
+        bool,
+        typer.Option("--serve/--no-serve", help="Start the dashboard, or just build the data."),
+    ] = True,
+    force: Annotated[
+        bool, typer.Option("--force", help="Overwrite a database that holds real runs.")
+    ] = False,
+) -> None:
+    """See the tool working immediately, without waiting for history to accumulate.
+
+        pip install flaky-test-detective
+        flaky demo
+
+    Builds a history containing flakes across a range of failure rates, one real
+    regression, a test that has never passed, a recovered test, and an order-dependent
+    victim with its polluter -- then opens the dashboard on it.
+
+    The history is **generated**, and the dashboard says so. What is not generated is the
+    analysis: every verdict comes from the same `analyze()` the CLI runs, over recorded
+    outcomes, so a broken detector would produce a broken demo. That is the difference
+    between this and a screenshot.
+    """
+    target = db or Path(".flaky-demo.db")
+    settings = load_config(None).with_overrides(db_path=target.expanduser().resolve())
+
+    with _storage(settings) as store:
+        if demo.contains_real_history(store) and not force:
+            stderr.print(
+                f"{settings.db_path} already holds runs that did not come from `flaky demo`.\n"
+                "Refusing to bury a real history under generated data. Either pick another "
+                "path with --db, or pass --force if you are sure."
+            )
+            raise typer.Exit(EXIT_USAGE)
+
+        summary = demo.build(store, seed=seed, runs=runs)
+
+    if summary.is_empty:
+        stdout.print(f"Demo history already present in {settings.db_path}.", style="dim")
+    else:
+        stdout.print(
+            f"Generated {summary.runs} runs and {summary.results} results across "
+            f"{summary.tests} tests in {settings.db_path} (seed {summary.seed})."
+        )
+
+    stdout.print()
+    stdout.print(
+        "This history is generated, not recorded from a real suite. The verdicts are real: "
+        "they come from the same analysis the CLI runs.",
+        style="yellow",
+    )
+    stdout.print()
+
+    result = _analyze(settings, since=None, branch=None, last=None)
+    stdout.print(
+        f"The detector found {len(result.flaky)} flaky, {len(result.regressions)} regression, "
+        f"{len(result.broken)} broken and {len(result.fixed)} fixed "
+        f"across {len(result.tests)} tests.",
+        style="dim",
+    )
+    stdout.print()
+    stdout.print("Try:", style="bold")
+    stdout.print(f"  flaky analyze --db {target}", style="dim")
+    stdout.print(f"  flaky report --db {target} --format md", style="dim")
+    worst = next((t for t in result.tests if t.verdict is Verdict.FLAKY), None)
+    if worst is not None:
+        stdout.print(f'  flaky blame --db {target} "{worst.test_id}"', style="dim")
+        stdout.print(f'  flaky issue --db {target} "{worst.test_id}"', style="dim")
+    stdout.print()
+
+    if not serve_it:
+        return
+
+    _run_dashboard(settings, host=web.LOOPBACK, port=port, open_browser=open_browser, quiet=True)
+
+
 @app.command()
 def serve(
     port: Annotated[int, typer.Option("--port", "-p", help="Port to listen on.")] = 8420,
@@ -916,6 +1007,18 @@ def serve(
             style="yellow",
         )
 
+    _run_dashboard(settings, host=host, port=port, open_browser=open_browser, quiet=quiet)
+
+
+def _run_dashboard(
+    settings: Config, *, host: str, port: int, open_browser: bool, quiet: bool
+) -> None:
+    """Start the dashboard and block until interrupted.
+
+    Shared by `serve` and `demo` rather than duplicated: the loopback warning and the
+    shutdown handling are exactly the kind of thing that gets fixed in one copy and not
+    the other.
+    """
     try:
         server = web.serve(settings, host=host, port=port, quiet=quiet)
     except web.DashboardError as exc:

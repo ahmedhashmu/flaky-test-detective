@@ -299,6 +299,17 @@ class TriageReport:
         return self.total_failures > 0 and not self.actionable
 
 
+DEMO_RUNNER = "flaky-demo"
+"""Runner name stamped on every run in a generated demo database.
+
+Lives here, in the leaf module, because two unrelated places need it: the builder that
+writes the demo history and the dashboard that has to say out loud that what is on screen
+was generated rather than observed. A demo that looks like real test results and turns out
+not to be would undo the credibility of everything else in the tool, so the marker travels
+with the data instead of relying on the user remembering how they got there.
+"""
+
+
 class Change(StrEnum):
     """What a branch did to one test, relative to the baseline it branched from.
 

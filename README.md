@@ -23,6 +23,27 @@ flaky. That distinction is the whole point.
 
 ---
 
+## Try it in two commands
+
+```sh
+pip install "git+https://github.com/ahmedhashmu/flaky-test-detective"
+flaky demo
+```
+
+A browser opens on a populated dashboard: flakes across a range of failure rates, one real
+regression, a test that has never passed, a recovered test, and an order-dependent flake
+with its polluter named. No test suite of your own, no waiting for history, no Node, and
+nothing from this repository needed beyond the installed package.
+
+There is no PyPI release yet, hence the git URL. Everything else about that line is
+literal — verified from a built wheel in a fresh virtualenv with the source tree absent.
+
+The history is **generated**, and the dashboard says so in a banner you cannot miss. What
+is *not* generated is the analysis: every verdict comes from the same `analyze()` the CLI
+runs, over recorded outcomes in a real SQLite database. A checked-in JSON fixture would
+have been easier and would have proved nothing — if the detector were broken, this demo
+would show it.
+
 ## The dashboard
 
 ```sh
@@ -63,7 +84,8 @@ Full detail, including the trust-score arithmetic: **[docs/dashboard.md](docs/da
 
 ## Contents
 
-- [The dashboard](#the-dashboard) · [The problem](#the-problem) ·
+- [Try it in two commands](#try-it-in-two-commands) ·
+  [The dashboard](#the-dashboard) · [The problem](#the-problem) ·
   [What's different](#whats-different) · [Measured accuracy](#measured-accuracy) ·
   [Validated on real repositories](#validated-on-real-repositories)
 - [Install](#install) · [Quick start](#quick-start) ·
@@ -323,6 +345,7 @@ the evidence of itself to argue it is flaky.
 
 | Command | What it does |
 |---|---|
+| `flaky demo` | Build a generated history and open the dashboard on it, in one command |
 | `flaky serve` | Open the dashboard: trust score, ranked tests, per-test investigation |
 | `flaky init` | Write a commented `.flaky.toml` and create the database |
 | `flaky ingest <paths…>` | Parse JUnit XML files, directories or globs |
@@ -641,13 +664,31 @@ uv sync
 Substitute `pip install -e ".[dev]"` for `uv sync` and drop the `uv run` prefixes to use
 pip instead.
 
-**1. Test suite** — 787 tests, about 16 seconds:
+**1. Test suite** — 809 tests, about 16 seconds:
 
 ```sh
 uv run pytest
 ```
 
-**2. See its measured accuracy.** This is the fastest way to judge whether the tool works:
+**2. See it working immediately**, with no suite of your own and no waiting:
+
+```sh
+uv run flaky demo --db /tmp/judge.db
+```
+
+A browser opens on a populated dashboard. The banner at the top says the history was
+generated; the verdicts under it were not. Add `--no-serve` to build the data without
+opening anything.
+
+Two things worth checking here, because they are what separate this from a screenshot:
+
+- `uv run flaky analyze --db /tmp/judge.db` shows the same verdicts the dashboard does,
+  because both call the same `analyze()`.
+- The order-dependent flake names a polluter that is a real test in the database, and the
+  investigation page for it splits *proven* evidence (same-commit divergence, polluter
+  correlation) from *inferred* (flip rate).
+
+**3. See its measured accuracy.** This is the fastest way to judge whether the tool works:
 
 ```sh
 uv run flaky benchmark
@@ -656,7 +697,7 @@ uv run flaky benchmark
 Expect a false-alarm rate of **0.0%** and accuracy around 93%. Try `--seed 99`, or
 `--sweep coverage` to watch accuracy collapse without commit data.
 
-**3. Watch it find real flakes.** `examples/flaky_demo/` has genuine nondeterminism: real
+**4. Watch it find real flakes.** `examples/flaky_demo/` has genuine nondeterminism: real
 threads racing real deadlines, an unsynchronized counter, a loopback socket race, unseeded
 randomness, and module-level state leaking between tests. Nothing is simulated with a coin
 flip on a hardcoded list.
@@ -676,7 +717,7 @@ Expect ~10 flaky tests, then check the three things that matter:
 - `test_expects_clean_registry` should be **order dependent**, naming
   `test_registers_session` as the polluter.
 
-**4. Open the dashboard** on the database you just built:
+**5. Open the dashboard** on the database you just built:
 
 ```sh
 uv run flaky serve --db /tmp/demo.db
@@ -705,7 +746,7 @@ signals (flip rate), because a pattern match must not borrow the authority of a
 measurement. Every number on the page comes from the same `analyze()` the CLI calls;
 `tests/test_web.py` asserts the payload verdicts match it exactly.
 
-**5. Export an issue body** for the tracker of your choice:
+**6. Export an issue body** for the tracker of your choice:
 
 ```sh
 uv run flaky issue test_expects_clean_registry --db /tmp/demo.db -f markdown
@@ -714,7 +755,7 @@ uv run flaky issue test_expects_clean_registry --db /tmp/demo.db -f slack
 
 It prints; it never posts. There is no credential to supply and nothing leaves the machine.
 
-**6. Prove it can tell whose fault flakiness is.** The demo suite ships a deterministic
+**7. Prove it can tell whose fault flakiness is.** The demo suite ships a deterministic
 mode, so the same tests can be recorded stable and then genuinely flaky — exactly the
 before/after a pull request creates:
 
@@ -741,7 +782,7 @@ Then three things worth checking, because they are where this is easy to get wro
 - Some tests land in "not enough evidence to attribute". That is the intended answer at 20
   runs a side, not a bug. Re-record the baseline with `-n 60` and watch them move.
 
-**7. Watch it refuse to certify a fix it cannot prove.** Record flaky history, then "fix"
+**8. Watch it refuse to certify a fix it cannot prove.** Record flaky history, then "fix"
 the tests by switching the demo suite to deterministic mode:
 
 ```sh
@@ -766,7 +807,7 @@ That refusal is the feature. A clean streak is only evidence in proportion to th
 is replacing, and for an order-dependent flake it is worth nothing at all unless the
 polluting order was actually exercised — which `verify` also counts.
 
-**8. Triage**, the CI gate:
+**9. Triage**, the CI gate:
 
 ```sh
 uv run pytest examples/flaky_demo -q --junitxml=/tmp/run.xml ; true
@@ -776,7 +817,7 @@ uv run flaky triage /tmp/run.xml --db /tmp/demo.db ; echo "exit: $?"
 Several tests failed; it should report only `test_known_broken` as needing attention, and
 exit 2.
 
-**9. Merge history from two machines:**
+**10. Merge history from two machines:**
 
 ```sh
 uv run flaky hunt -n 6 --db /tmp/a.db -- uv run pytest examples/flaky_demo -q
@@ -785,7 +826,7 @@ uv run flaky merge /tmp/b.db --into /tmp/a.db     # 12 runs
 uv run flaky merge /tmp/b.db --into /tmp/a.db     # no-op, idempotent
 ```
 
-**10. Verify the quarantine export really works:**
+**11. Verify the quarantine export really works:**
 
 ```sh
 uv run flaky quarantine recommend --db /tmp/demo.db --apply
@@ -796,7 +837,7 @@ PYTHONPATH=/tmp/qp uv run pytest examples/flaky_demo -p qplugin -q -rs
 Quarantined tests are reported as skipped with a reason. `test_known_broken` still fails,
 because quarantine never hides a real failure.
 
-**11. Confirm this project's own suite is not flaky** — a reasonable thing to demand of this
+**12. Confirm this project's own suite is not flaky** — a reasonable thing to demand of this
 particular tool:
 
 ```sh

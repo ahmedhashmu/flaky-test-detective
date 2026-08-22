@@ -113,6 +113,48 @@ jobs:
         with:
           enable-cache: true
 
+      # The path a new user actually takes. `flaky demo` is the first command anyone runs,
+      # so it is checked from the built wheel in a clean virtualenv with the source tree
+      # unavailable -- the failure mode being a demo that works from a git checkout and
+      # not from an install.
+      - name: The two-command path works from a wheel
+        run: |
+          uv build --wheel -o dist-check
+          uv venv --python 3.12 /tmp/demoenv
+          VIRTUAL_ENV=/tmp/demoenv uv pip install dist-check/*.whl
+
+          cd /tmp
+          /tmp/demoenv/bin/flaky demo --db /tmp/ci-demo.db --no-serve
+
+          /tmp/demoenv/bin/flaky report --db /tmp/ci-demo.db --format json \
+            -o /tmp/ci-demo.json
+          python3 - <<'PY'
+          import json, pathlib
+
+          report = json.loads(pathlib.Path("/tmp/ci-demo.json").read_text())
+          verdicts = [t["verdict"] for t in report["tests"]]
+          counts = {v: verdicts.count(v) for v in set(verdicts)}
+          print("demo verdicts:", counts)
+
+          # Nothing on the demo dashboard may be empty, and these verdicts come from the
+          # real analysis over the generated history -- a broken detector fails here.
+          for verdict in ("flaky", "regression", "broken", "fixed", "stable"):
+              assert counts.get(verdict, 0) >= 1, f"demo produced no {verdict} test"
+
+          ordered = [t for t in report["tests"] if t.get("order_dependence")]
+          assert ordered, "demo produced no diagnosable order-dependent flake"
+
+          known = {t["test_id"] for t in report["tests"]}
+          for test in ordered:
+              polluter = test["order_dependence"]["likely_polluter"]
+              assert polluter in known, f"polluter {polluter} is not a real test"
+
+          # The answer key must not be printed next to the verdict.
+          for leak in ("test_flaky_", "test_victim_", "test_polluter_", "_p70"):
+              assert not any(leak in t for t in known), leak
+          print("demo history is complete and does not leak its labels")
+          PY
+
       # An end-to-end check that the server actually serves: real database, real
       # analysis, real HTTP. A dashboard that only passes unit tests can still 500
       # on the first request a judge makes.

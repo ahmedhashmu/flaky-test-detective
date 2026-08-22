@@ -20,6 +20,12 @@ htmlcov/
 .flaky.db-wal
 .flaky.db-shm
 *.flaky.db
+# `flaky demo` writes here by default. Generated data, so never committed -- and it must
+# not be, or the committed copy would be the fixture this deliberately is not.
+.flaky-demo.db
+.flaky-demo.db-wal
+.flaky-demo.db-shm
+dist-check/
 reports/
 flaky-report.html
 
