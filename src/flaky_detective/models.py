@@ -133,6 +133,34 @@ class OrderEvidence:
     likely_polluter: str | None = None
     polluter_failure_share: float = 0.0
 
+    polluter_distance: float = 0.0
+    """Median gap, in test positions, between the polluter and this test on failures.
+
+    1.0 means immediately before. Reported because it tells a reader how to reproduce the
+    failure: a polluter four tests back is not something you would find by running the
+    pair together.
+    """
+
+    polluter_lift: float = 0.0
+    """How much more often this test fails after the polluter than it fails at all.
+
+    A ratio, so 6.0 reads as "six times its usual rate". More interpretable than the
+    p-value beside it, and the two are reported together because a large lift measured
+    over four runs and a large lift measured over forty are not the same claim.
+    """
+
+    polluter_observations: int = 0
+    """Runs in which the polluter ran ahead of this test, at any distance in the window."""
+
+    candidates_considered: int = 0
+    """How many predecessors were tested before this one was named.
+
+    Carried because it is the multiplicity correction's denominator. Searching a window of
+    predecessors instead of only the immediate one means testing several hypotheses per
+    victim, and a reader is entitled to know how many, since that is exactly what makes a
+    0.05 threshold too generous.
+    """
+
 
 @dataclass(frozen=True, slots=True)
 class CauseEvidence:

@@ -63,6 +63,13 @@ class GroundTruth:
     truth: Truth
     failure_rate: float = 0.0
     polluter: str | None = None
+    polluter_distance: int = 0
+    """Tests between the polluter and the victim. 1 is immediately before.
+
+    Recorded so accuracy can be reported per distance, which is the only way to see where
+    the detector's reach ends rather than averaging it into one number.
+    """
+
     detectable: bool = True
     """False when the generated history cannot support the correct answer.
 
@@ -92,6 +99,14 @@ class Population:
 # 0.05 is near-undetectable in a short window; 0.9 is nearly indistinguishable from
 # broken. Both are included on purpose.
 FLAKE_RATES = (0.05, 0.15, 0.3, 0.5, 0.7, 0.9)
+
+POLLUTER_DISTANCES = (1, 2, 3, 5, 8)
+"""How many tests separate a polluter from its victim, cycled across the population.
+
+Includes 8, which is beyond the detector's default search window, on purpose: a benchmark
+whose hardest case is inside the implementation's reach cannot report a limit. Recall below
+1.000 here is the honest consequence and is published rather than tuned away.
+"""
 
 MESSAGES = {
     Truth.FLAKY: "TimeoutError: timed out after 30s waiting for the worker",
@@ -181,11 +196,22 @@ def generate_population(
     for index in range(order_dependent):
         victim = f"tests/test_order.py::test_victim_{index}"
         polluter = f"tests/test_order.py::test_polluter_{index}"
+        # Distances cycle so the population spans adjacency and genuine gaps. Without a
+        # spread here the harness can only certify a detector that looks one slot back.
+        distance = POLLUTER_DISTANCES[index % len(POLLUTER_DISTANCES)]
         truths[victim] = GroundTruth(
-            victim, Truth.ORDER_DEPENDENT, failure_rate=0.5, polluter=polluter
+            victim,
+            Truth.ORDER_DEPENDENT,
+            failure_rate=0.5,
+            polluter=polluter,
+            polluter_distance=distance,
         )
         truths[polluter] = GroundTruth(polluter, Truth.STABLE)
-        outcomes.extend(_order_dependent(victim, polluter, index, runs, commits, timestamps, rng))
+        outcomes.extend(
+            _order_dependent(
+                victim, polluter, index, runs, commits, timestamps, rng, distance=distance
+            )
+        )
 
     return Population(
         outcomes=outcomes,
@@ -357,38 +383,64 @@ def _order_dependent(
     commits: list[str | None],
     timestamps: list[str],
     rng: random.Random,
+    distance: int = 1,
 ) -> list[TestOutcome]:
-    """The victim fails exactly when the polluter ran immediately before it.
+    """The victim fails whenever the polluter ran earlier, at `distance` tests back.
 
     Order genuinely varies between runs, which is what a shuffling runner produces
     and what the detector needs in order to have anything to correlate. Each group
     occupies its own position band with its own fillers, so positions stay unique
-    within a run and "ran immediately before" means what it says.
+    within a run.
+
+    **`distance` exists because this generator was wrong.** Every polluter used to sit
+    immediately before its victim, which encoded the detector's own adjacency assumption
+    into the answer key. The benchmark scored order dependence at 1.000 precision and
+    recall while the real-world figure was 11.6%, because both halves believed the same
+    false thing. Varying the distance is what makes the measurement able to disagree with
+    the implementation. See ADR-0014.
     """
     base = ORDER_BAND * (group + 1)
+    gap = max(1, distance)
     built: list[TestOutcome] = []
+
+    # Fillers sit between the polluter and the victim, so the gap is real: `distance`
+    # other tests genuinely executed in between.
+    spacers = [f"tests/test_order.py::test_spacer_{group}_{i}" for i in range(gap - 1)]
 
     for run in range(runs):
         polluter_first = rng.random() < 0.5
 
         if polluter_first:
-            # Polluter immediately before the victim, mid-band.
+            # An extra leading filler, so the victim lands at a different index than it
+            # does in the clean layout. Detection requires the victim's position to vary
+            # at all -- a test pinned to one index cannot have its outcome explained by
+            # position -- and a generator that pinned it would silently test nothing.
             layout = [
                 (f"tests/test_order.py::test_filler_{group}_a", base + 0, True),
-                (polluter, base + 4, True),
-                (victim, base + 5, False),
-                (f"tests/test_order.py::test_filler_{group}_b", base + 7, True),
-                (f"tests/test_order.py::test_filler_{group}_c", base + 9, True),
+                (f"tests/test_order.py::test_filler_{group}_c", base + 1, True),
             ]
+            slot = base + 3
+            layout.append((polluter, slot, True))
+            for spacer in spacers:
+                slot += 1
+                layout.append((spacer, slot, True))
+            layout.append((victim, slot + 1, False))
+            layout.append((f"tests/test_order.py::test_filler_{group}_b", slot + 3, True))
         else:
-            # Victim early, polluter late, so nothing polluting precedes it.
-            layout = [
-                (f"tests/test_order.py::test_filler_{group}_a", base + 0, True),
-                (victim, base + 2, True),
-                (f"tests/test_order.py::test_filler_{group}_b", base + 5, True),
-                (f"tests/test_order.py::test_filler_{group}_c", base + 7, True),
-                (polluter, base + 9, True),
-            ]
+            # The spacers still run *before* the victim, and only the polluter moves to the
+            # end. That isolation is the whole point of the layout: if the spacers ran
+            # before the victim only in the polluting case, they would be perfectly
+            # correlated with the polluter and no detector could tell them apart. Measured
+            # with the confounded version, polluter accuracy was 2/8 at every window
+            # because the nearest spacer was blamed every time.
+            layout = [(f"tests/test_order.py::test_filler_{group}_a", base + 0, True)]
+            slot = base + 2
+            for spacer in spacers:
+                layout.append((spacer, slot, True))
+                slot += 1
+            layout.append((victim, slot + 1, True))
+            layout.append((polluter, slot + 3, True))
+            layout.append((f"tests/test_order.py::test_filler_{group}_b", slot + 5, True))
 
         for test_id, position, passes in layout:
             built.append(

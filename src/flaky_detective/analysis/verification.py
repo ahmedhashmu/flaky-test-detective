@@ -264,19 +264,25 @@ def count_exposures(
     test_id: str,
     polluter: str,
     outcomes: list,
-    predecessors: dict[tuple[str, str], str],
+    ordering: dict[tuple[str, str], tuple[tuple[str, int], ...]],
 ) -> int:
-    """How many of these runs put `polluter` immediately before `test_id`.
+    """How many of these runs ran `polluter` ahead of `test_id`, inside the window.
 
     Lives here rather than in `ordering.py` because it answers a verification question,
-    not a detection one, and takes the predecessor index the caller already built for
-    the analysis.
+    not a detection one, and takes the index the caller already built for the analysis.
+
+    Deliberately the same notion of "ahead of" that detection uses. If detection can name a
+    polluter four tests back while verification only counts adjacency, every such fix
+    becomes permanently unverifiable for a reason that is an artefact of the mismatch.
     """
     return sum(
         1
         for outcome in outcomes
         if outcome.test_id == test_id
-        and predecessors.get((outcome.run_uid or "", test_id)) == polluter
+        and any(
+            candidate == polluter
+            for candidate, _ in ordering.get((outcome.run_uid or "", test_id), ())
+        )
     )
 
 

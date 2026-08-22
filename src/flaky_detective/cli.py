@@ -688,13 +688,17 @@ def _polluter_exposures(
     if before.order is None or not before.order.likely_polluter:
         return None
 
-    from .analysis.ordering import build_predecessor_index
+    from .analysis.ordering import build_ordering_index
 
+    # The windowed index, matching how the polluter was found. Counting only distance-1
+    # exposures would report zero for a polluter detected four tests back, and fix
+    # verification would then refuse to conclude for a reason that is an artefact of the
+    # mismatch rather than anything about the fix.
     return count_exposures(
         test_id,
         before.order.likely_polluter,
         after_outcomes,
-        build_predecessor_index(after_outcomes),
+        build_ordering_index(after_outcomes),
     )
 
 
@@ -857,10 +861,10 @@ def history(
         outcomes = store.outcomes_for_test(resolved)
         all_outcomes = store.outcomes()
 
-    from .analysis.ordering import build_predecessor_index
+    from .analysis.ordering import build_ordering_index
 
     analysis = analyze_one(
-        resolved, outcomes, settings, predecessors=build_predecessor_index(all_outcomes)
+        resolved, outcomes, settings, ordering=build_ordering_index(all_outcomes)
     )
     timeline = [(o.started_at or "", str(o.status), o.message) for o in outcomes[-limit:]]
     console_report.render_history(resolved, analysis, timeline, stdout)
@@ -1106,10 +1110,10 @@ def issue_command(
         outcomes = store.outcomes_for_test(resolved)
         all_outcomes = store.outcomes()
 
-    from .analysis.ordering import build_predecessor_index
+    from .analysis.ordering import build_ordering_index
 
     analysis = analyze_one(
-        resolved, outcomes, settings, predecessors=build_predecessor_index(all_outcomes)
+        resolved, outcomes, settings, ordering=build_ordering_index(all_outcomes)
     )
     attribution = blame_test(resolved, outcomes)
 

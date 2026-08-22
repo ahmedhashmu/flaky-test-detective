@@ -23,11 +23,17 @@ from .classify import classify, remediation_for
 from .clustering import cluster_failures
 from .comparison import compare
 from .flakiness import analyze_test
-from .ordering import build_predecessor_index, detect_order_dependence
+from .ordering import (
+    OrderingIndex,
+    build_ordering_index,
+    build_predecessor_index,
+    detect_order_dependence,
+)
 
 __all__ = [
     "analyze",
     "analyze_one",
+    "build_ordering_index",
     "build_predecessor_index",
     "classify",
     "cluster_failures",
@@ -48,11 +54,11 @@ def analyze(outcomes: list[TestOutcome], config: Config | None = None) -> Analys
         by_test[outcome.test_id].append(outcome)
 
     # Built once over the whole dataset; per-test construction would be quadratic.
-    predecessors = build_predecessor_index(considered)
+    ordering = build_ordering_index(considered, settings.order_window)
 
     analyses: list[TestAnalysis] = []
     for test_id, test_outcomes in by_test.items():
-        analyses.append(analyze_one(test_id, test_outcomes, settings, predecessors=predecessors))
+        analyses.append(analyze_one(test_id, test_outcomes, settings, ordering=ordering))
 
     # Sort by score, then test_id. The explicit tiebreaker keeps output stable
     # between runs when scores tie, which they often do at 0.0.
@@ -76,7 +82,7 @@ def analyze_one(
     outcomes: list[TestOutcome],
     config: Config | None = None,
     *,
-    predecessors: dict[tuple[str, str], str] | None = None,
+    ordering: OrderingIndex | None = None,
 ) -> TestAnalysis:
     """Analyze a single test, including diagnosis.
 
@@ -93,7 +99,7 @@ def analyze_one(
         fixed_run_streak=settings.fixed_run_streak,
     )
 
-    order = detect_order_dependence(outcomes, predecessors)
+    order = detect_order_dependence(outcomes, ordering)
     messages = [o.message or "" for o in outcomes if o.status.is_failure or o.retried]
     cause = classify(messages, order) if (messages or order) else None
 

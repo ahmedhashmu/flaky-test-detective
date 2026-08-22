@@ -130,10 +130,55 @@ the real-world figure was 11.6%.
 **A benchmark that agrees with your assumptions cannot correct them.** That is the most
 useful thing this page has produced so far.
 
-Fixing it is tracked as the polluter graph in
-[`.kiro/specs/`](../.kiro/specs/), and the generated benchmark now needs a case where the
-polluter runs at a distance, or it will keep certifying a detector that only works on
-adjacency.
+### The obvious fix did not work
+
+The generator was corrected to place polluters at distances of 1, 2, 3, 5 and 8, and the
+detector was extended to search a window of preceding tests with a multiplicity correction.
+On generated data that is a clear win: polluter naming 6/24 → 21/24 at precision 1.000
+([docs/accuracy.md](accuracy.md)).
+
+Re-analysing these same recorded runs at each window:
+
+| Search window | Diagnosed | Polluter named |
+|---|---:|---:|
+| 1 | 16 (11.0%) | 8 (5.5%) |
+| 3 | 14 (9.6%) | 6 (4.1%) |
+| 6 | 16 (11.0%) | 8 (5.5%) |
+| 8 | 15 (10.3%) | 7 (4.8%) |
+| 12 | 15 (10.3%) | 7 (4.8%) |
+
+**No trend.** The median distance of the polluters it does find is 1.0 even at window 12:
+widening the search finds nothing new, because the extra candidates tighten the significance
+threshold by as much as the extra reach buys.
+
+So the hypothesis was wrong for real code. It is recorded rather than dropped, because it was
+the obvious hypothesis and the generated benchmark endorsed it enthusiastically.
+
+### What is actually blocking it
+
+Instrumenting every gate over the 146 order-labelled flakes:
+
+| Where it stops | Count |
+|---|---:|
+| No candidate correlates strongly enough (share < 0.9) | ~109 |
+| Cleared the share gate, failed the significance test | 15 |
+| A polluter was named | 8 |
+| Too few observations on one side | 9 |
+| Fails too often for anyone to be blamed (≥ 75%) | 6 |
+
+Median best-candidate share: **0.73**. Real pollution is not near-deterministic, so the 0.9
+share threshold looked like the binding constraint. Lowering it to 0.6 was tried and
+**reverted**: naming went from 8 to 8, because the candidates that newly cleared the share
+gate then failed the significance test underneath it.
+
+The honest reading is that correlational polluter identification has a ceiling on randomly
+shuffled real suites. IDoFT's order-dependent entries were found with *deliberate* orderings,
+often full reversal; random shuffling reproduces a specific pairing too rarely, and often no
+single predecessor explains the failures at any defensible confidence.
+
+**So the number stays at 11%.** The tool detects order-dependent tests essentially perfectly
+and explains about one in nine. Full sequence in
+[ADR-0014](adr/0014-search-a-window-for-the-polluter.md).
 
 ## What this cannot tell you
 

@@ -21,7 +21,7 @@ Six ground-truth labels are generated, spanning the range that matters:
 | `broken` | always fails | `broken` |
 | `regression` | passes until commit *k*, fails after — half of them with flaky history before the break | `regression` |
 | `fixed` | flaky early, then a clean streak | `fixed` |
-| `order_dependent` | fails if and only if a named polluter ran immediately before | `flaky`, cause `order_dependence` |
+| `order_dependent` | fails if and only if a named polluter ran earlier, at a distance of 1, 2, 3, 5 or 8 tests | `flaky`, cause `order_dependence` |
 
 The hard cases are in there deliberately. A generator that only produced alternating
 pass/fail would score 100% and prove nothing.
@@ -105,12 +105,50 @@ Every error is in the `flaky` row, and each is explainable:
 
 ## Order dependence
 
+Polluters are generated at distances of 1, 2, 3, 5 and 8 tests from their victim, cycled
+across the population. **8 is beyond the detector's default search window on purpose**: a
+benchmark whose hardest case sits inside the implementation's reach cannot report a limit.
+
 | Metric | Value |
 |---|---|
 | Diagnosed as order-dependent | 8 of 8 (recall 100%) |
-| Correct polluter named | 8 of 8 (precision 100%) |
+| Polluter named | 7 of 8 |
+| Correct polluter, of those named | 7 of 7 (precision 1.000) |
 
-Both perfect — but only after the benchmark caught a bug **in the benchmark**. The
+The one not named is the distance-8 case. The detector declines rather than blaming the
+nearest bystander, which is the behaviour worth having: precision is **1.000 at every
+search window**, and across 300 generated tests with no polluter at all, none was ever
+given one.
+
+### How far back to look
+
+`flaky benchmark --sweep window`, three seeds:
+
+| Search window | Polluter named | Precision | False alarm | Accuracy |
+|---|---:|---:|---:|---:|
+| 1 | 6/24 | 1.000 | 0.0% | 94.7% |
+| 2 | 12/24 | 1.000 | 0.0% | 94.7% |
+| 3 | 18/24 | 1.000 | 0.0% | 94.7% |
+| **6** (default) | **21/24** | **1.000** | 0.0% | 94.7% |
+| 8 | 24/24 | 1.000 | 0.0% | 94.7% |
+| 12 | 24/24 | 1.000 | 0.0% | 94.7% |
+
+Naming rate up 3.5× from the old adjacency-only search, at no cost to accuracy, false
+alarms or missed breaks. The default is 6 rather than 8 because 8 is exactly the
+generator's hardest distance, and choosing it would be tuning to the fixture — and because
+on **real** repositories the wider window buys nothing at all. That negative result, and
+what is actually blocking diagnosis there, is in
+[ADR-0014](adr/0014-search-a-window-for-the-polluter.md) and
+[`docs/real-world.md`](real-world.md).
+
+Three fixture bugs had to be fixed before any of the above could be measured, and all
+three produced *plausible* numbers: spacer tests confounded with the polluter (2/8 at every
+window), the victim pinned to one position so detection correctly declined every time
+(0/8), and a scorer dividing precision by the wrong denominator so an honest refusal to
+attribute counted the same as a wrong attribution (0.875 while every name given was
+correct).
+
+This is the second time the harness has been the thing at fault. The
 first generator gave every order-dependent group the same handful of positions and
 shared filler test ids, so multiple tests occupied one position per run. Predecessor
 computation sorts by position, and with ties that ordering is arbitrary, so the

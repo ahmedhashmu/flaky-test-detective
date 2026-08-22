@@ -191,6 +191,8 @@ def test_detail_payload(
         return None
 
     attribution = blame(test_id, outcomes)
+    # Distance-1, because the neighbour table answers "what ran immediately before" as a
+    # thing to display. Detection searches a window; this is not that.
     predecessors = build_predecessor_index(all_outcomes)
 
     return {

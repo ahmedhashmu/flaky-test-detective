@@ -93,9 +93,20 @@ class BenchmarkResult:
     order_dependent_total: int = 0
     order_dependent_diagnosed: int = 0
     order_dependent_polluter_correct: int = 0
+    order_dependent_polluter_named: int = 0
+    """How many order-dependent tests had *some* polluter named, right or wrong.
+
+    The denominator for polluter precision. Precision used to divide by
+    `order_dependent_diagnosed`, which counts tests diagnosed as order dependent by any
+    route -- including the message-text heuristic, which needs no polluter at all. A victim
+    the detector honestly declined to attribute therefore counted against precision as
+    though it had been attributed wrongly, and the reported 0.875 hid the fact that every
+    polluter actually named was correct.
+    """
 
     runs: int = 0
     commit_coverage: float = 1.0
+    order_window: int = 0
     seed: int = 0
     notes: tuple[str, ...] = field(default=())
 
@@ -125,10 +136,26 @@ class BenchmarkResult:
 
     @property
     def polluter_precision(self) -> float:
-        """Of the order-dependent tests diagnosed, how many named the right culprit?"""
-        if not self.order_dependent_diagnosed:
+        """Of the polluters we named, how many were the right test?
+
+        Divides by how many were *named*, not by how many tests were diagnosed. Declining
+        to attribute is not the same mistake as attributing wrongly, and a metric that
+        treats them alike would push the detector towards guessing.
+        """
+        if not self.order_dependent_polluter_named:
             return 0.0
-        return self.order_dependent_polluter_correct / self.order_dependent_diagnosed
+        return self.order_dependent_polluter_correct / self.order_dependent_polluter_named
+
+    @property
+    def polluter_naming_rate(self) -> float:
+        """Of the order-dependent tests, how many got a polluter named at all?
+
+        Reported separately from precision because they move in opposite directions and a
+        single number would hide the trade.
+        """
+        if not self.order_dependent_total:
+            return 0.0
+        return self.order_dependent_polluter_named / self.order_dependent_total
 
     @property
     def polluter_recall(self) -> float:
@@ -149,6 +176,7 @@ def score_predictions(
     runs: int = 0,
     commit_coverage: float = 1.0,
     seed: int = 0,
+    order_window: int = 0,
 ) -> BenchmarkResult:
     """Compare predicted verdicts against ground truth.
 
@@ -164,7 +192,7 @@ def score_predictions(
 
     total = correct = undetectable = 0
     false_alarms = breaks_total = missed_breaks = flaky_total = 0
-    order_total = order_diagnosed = order_polluter_ok = 0
+    order_total = order_diagnosed = order_polluter_ok = order_polluter_named = 0
 
     for test_id, truth in truths.items():
         if not truth.detectable:
@@ -204,7 +232,12 @@ def score_predictions(
             order_total += 1
             if causes.get(test_id) == "order_dependence":
                 order_diagnosed += 1
-                if polluters.get(test_id) == truth.polluter:
+            # Counted independently of the diagnosis. A polluter can be named while the
+            # cause is attributed elsewhere, and precision has to be measured against what
+            # was actually named or declining to attribute looks like attributing wrongly.
+            if named := polluters.get(test_id):
+                order_polluter_named += 1
+                if named == truth.polluter:
                     order_polluter_ok += 1
 
     labels = tuple(
@@ -230,7 +263,9 @@ def score_predictions(
         order_dependent_total=order_total,
         order_dependent_diagnosed=order_diagnosed,
         order_dependent_polluter_correct=order_polluter_ok,
+        order_dependent_polluter_named=order_polluter_named,
         runs=runs,
         commit_coverage=commit_coverage,
         seed=seed,
+        order_window=order_window,
     )

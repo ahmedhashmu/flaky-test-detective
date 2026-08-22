@@ -166,7 +166,10 @@ pytest, jest, go, JUnit, Gradle and .NET all work without it knowing anything ab
 | `regression` | 8 | 0.800 | 1.000 | 0.889 |
 | `fixed` | 6 | 0.600 | 1.000 | 0.750 |
 
-Order dependence: **8 of 8 diagnosed, all naming the correct polluter.**
+Order dependence: **8 of 8 diagnosed**, a polluter named for 7 of them, and **every polluter
+named was the correct test** — precision 1.000 at every search window. The eighth sits
+beyond the default search window and the detector declines rather than blaming the nearest
+bystander.
 
 The false-alarm rate is 0.0% across six different seeds. Two honest weak spots: at only
 **5 runs** of history it rises to 12.5%, and with **no commit SHAs** it rises to 25% —
@@ -221,11 +224,20 @@ get that wrong.
 
 **And the row that matters second-most is the last one.** The detector found 146 of 146
 order-dependent tests and *explained* only 17. The generated benchmark had scored order
-dependence at 1.000 precision and recall, because it places every polluter immediately
+dependence at 1.000 precision and recall, because it placed every polluter immediately
 before its victim — the exact assumption
-[ADR-0004](docs/adr/0004-order-dependence-needs-a-polluter.md) shipped with. Real suites
-shuffle, so the polluter is usually several tests back. A benchmark that agrees with your
-assumptions cannot correct them; real repositories did.
+[ADR-0004](docs/adr/0004-order-dependence-needs-a-polluter.md) shipped with. A benchmark that
+agrees with your assumptions cannot correct them; real repositories did.
+
+The obvious fix was to search further back. It works on generated data — polluter naming
+6/24 → 21/24 at precision 1.000 — and on real repositories it buys **nothing**: 8 named at
+window 1, 8 at window 6, drifting with no trend. Instrumenting the gates showed why, and it
+was not distance: ~109 of the 146 fail because no single predecessor correlates strongly
+enough, median best share 0.73. Relaxing that threshold was tried and reverted, because it
+moved the number from 8 to 8.
+
+So the figure stays at 11%, and the negative result is published next to it:
+**[ADR-0014](docs/adr/0014-search-a-window-for-the-polluter.md)**.
 
 Method, per-project results, the two projects that could not be built and every dependency
 pin required: **[docs/real-world.md](docs/real-world.md)**.
@@ -570,8 +582,11 @@ Stated plainly, because a tool about trustworthy signals should be honest about 
 - **Low-rate flakes look `fixed`.** A test that failed twice in 30 runs then passed 20
   times running is indistinguishable from a fixed one until it fails again. `fixed`
   precision is 0.600.
-- **Order dependence only checks the immediately preceding test.** A polluter running
-  several tests earlier is missed; checking all of them is quadratic in suite size.
+- **Order dependence is diagnosed for only about 1 in 9 real order-dependent tests**, even
+  though they are *detected* as flaky essentially perfectly. Searching a window of
+  predecessors instead of only the adjacent one fixed this on generated data and not on real
+  code; measured, published, and explained in
+  [ADR-0014](docs/adr/0014-search-a-window-for-the-polluter.md).
 - **Root-cause categories are heuristics.** They will misclassify; matched terms are shown
   so you can tell when they have.
 - **The benchmark uses synthetic data.** Real flakiness clusters; the generator models
@@ -664,7 +679,7 @@ uv sync
 Substitute `pip install -e ".[dev]"` for `uv sync` and drop the `uv run` prefixes to use
 pip instead.
 
-**1. Test suite** — 809 tests, about 16 seconds:
+**1. Test suite** — 817 tests, about 17 seconds:
 
 ```sh
 uv run pytest

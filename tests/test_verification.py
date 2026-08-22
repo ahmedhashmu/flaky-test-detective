@@ -19,7 +19,7 @@ import pytest
 
 from flaky_detective.analysis import analyze
 from flaky_detective.analysis import compare as compare_reports
-from flaky_detective.analysis.ordering import build_predecessor_index
+from flaky_detective.analysis.ordering import build_ordering_index
 from flaky_detective.analysis.verification import (
     MIN_AFTER_RUNS,
     MIN_EXPOSURES,
@@ -199,13 +199,13 @@ class TestExposureCounting:
                 outcome("t.py::victim", Status.PASSED, run=run, commit="c1", position=1)
             )
 
-        predecessors = build_predecessor_index(outcomes)
-        assert count_exposures("t.py::victim", "t.py::polluter", outcomes, predecessors) == 3
+        ordering = build_ordering_index(outcomes)
+        assert count_exposures("t.py::victim", "t.py::polluter", outcomes, ordering) == 3
 
     def test_returns_zero_when_the_polluter_never_preceded_it(self) -> None:
         outcomes = sequence("t.py::victim", "...", commits=["c1"] * 3)
-        predecessors = build_predecessor_index(outcomes)
-        assert count_exposures("t.py::victim", "t.py::nobody", outcomes, predecessors) == 0
+        ordering = build_ordering_index(outcomes)
+        assert count_exposures("t.py::victim", "t.py::nobody", outcomes, ordering) == 0
 
 
 class TestRendering:

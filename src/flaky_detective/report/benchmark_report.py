@@ -239,6 +239,22 @@ def render_markdown(result: BenchmarkResult) -> str:
 
 def render_sweep_markdown(results: list[BenchmarkResult], axis: str) -> str:
     """A table showing how accuracy responds to the evidence available."""
+    if axis == "window":
+        # The window sweep is about attribution, not classification, so it gets its own
+        # columns. Showing flaky recall against window would report a number the axis does
+        # not move and hide the two it does.
+        lines = [
+            "| Search window | Polluter named | Polluter precision | False alarm rate | Accuracy |",
+            "|---|---:|---:|---:|---:|",
+        ]
+        for result in results:
+            named = f"{result.order_dependent_polluter_named}/{result.order_dependent_total}"
+            lines.append(
+                f"| {result.order_window} | {named} | {result.polluter_precision:.3f} | "
+                f"{result.false_alarm_rate:.1%} | {result.accuracy:.1%} |"
+            )
+        return "\n".join(lines) + "\n"
+
     heading = "Runs recorded" if axis == "runs" else "Commit coverage"
     lines = [
         f"| {heading} | Flaky recall | Flaky precision | False alarm rate | Accuracy |",

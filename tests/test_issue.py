@@ -14,7 +14,7 @@ import pytest
 
 from flaky_detective.analysis import analyze, analyze_one
 from flaky_detective.analysis.attribution import blame
-from flaky_detective.analysis.ordering import build_predecessor_index
+from flaky_detective.analysis.ordering import build_ordering_index
 from flaky_detective.config import Config
 from flaky_detective.models import Status
 from flaky_detective.report import issue
@@ -56,7 +56,7 @@ def order_dependent_analysis():
         "tests/t.py::victim",
         [o for o in outcomes if o.test_id == "tests/t.py::victim"],
         Config(),
-        predecessors=build_predecessor_index(outcomes),
+        ordering=build_ordering_index(outcomes),
     )
     return analysis, outcomes
 

@@ -38,6 +38,7 @@ __all__ = [
 
 DEFAULT_SWEEP_RUNS = (5, 10, 20, 30, 50)
 DEFAULT_SWEEP_COVERAGE = (0.0, 0.25, 0.5, 1.0)
+DEFAULT_SWEEP_WINDOW = (1, 2, 3, 4, 6, 8, 12)
 
 
 def run_benchmark(
@@ -79,6 +80,7 @@ def run_benchmark(
         runs=runs,
         commit_coverage=commit_coverage,
         seed=seed,
+        order_window=settings.order_window,
     )
 
 
@@ -99,7 +101,21 @@ def sweep(
     - `coverage`: how much worse is it without commit SHAs? The design claims
       same-commit divergence is the load-bearing signal, and this is where that claim
       either holds up or does not.
+    - `window`: how far back should the polluter search look? The default came out of
+      this sweep rather than out of a preference, and the sweep is kept runnable so the
+      choice can be re-argued when the population changes.
     """
+    if over == "window":
+        chosen = values or DEFAULT_SWEEP_WINDOW
+        return [
+            run_benchmark(
+                seed=seed,
+                config=(config or Config()).with_overrides(order_window=int(value)),
+                **kwargs,  # type: ignore[arg-type]
+            )
+            for value in chosen
+        ]
+
     if over == "runs":
         chosen = values or DEFAULT_SWEEP_RUNS
         return [
@@ -114,4 +130,4 @@ def sweep(
             for value in chosen
         ]
 
-    raise ValueError(f"Cannot sweep over {over!r}. Use 'runs' or 'coverage'.")
+    raise ValueError(f"Cannot sweep over {over!r}. Use 'runs', 'coverage', or 'window'.")

@@ -25,6 +25,14 @@ naming a flake is cheap, removing it from the suite should not be.
 """
 
 DEFAULT_CONFIDENCE_RUNS = 10
+DEFAULT_ORDER_WINDOW = 6
+"""How many preceding tests are searched for a polluter.
+
+Mirrors `analysis.ordering.DEFAULT_WINDOW`, and is exposed here because it is a real
+trade a project might want to make: wider finds polluters further back, and costs
+precision through the multiplicity correction. Swept in `flaky benchmark --sweep
+window`, so the default is a measurement rather than a preference.
+"""
 DEFAULT_FIXED_RUN_STREAK = 10
 DEFAULT_HUNT_ITERATIONS = 10
 
@@ -38,6 +46,7 @@ class Config:
     flake_threshold: float = DEFAULT_FLAKE_THRESHOLD
     quarantine_threshold: float = DEFAULT_QUARANTINE_THRESHOLD
     confidence_runs: int = DEFAULT_CONFIDENCE_RUNS
+    order_window: int = DEFAULT_ORDER_WINDOW
     fixed_run_streak: int = DEFAULT_FIXED_RUN_STREAK
     hunt_iterations: int = DEFAULT_HUNT_ITERATIONS
     quarantine_days: int = 14
@@ -92,6 +101,7 @@ def load_config(path: Path | None = None, start: Path | None = None) -> Config:
         flake_threshold=_number(section, "flake_threshold", DEFAULT_FLAKE_THRESHOLD),
         quarantine_threshold=_number(section, "quarantine_threshold", DEFAULT_QUARANTINE_THRESHOLD),
         confidence_runs=int(_number(section, "confidence_runs", DEFAULT_CONFIDENCE_RUNS)),
+        order_window=int(_number(section, "order_window", DEFAULT_ORDER_WINDOW)),
         fixed_run_streak=int(_number(section, "fixed_run_streak", DEFAULT_FIXED_RUN_STREAK)),
         hunt_iterations=int(_number(section, "hunt_iterations", DEFAULT_HUNT_ITERATIONS)),
         quarantine_days=int(_number(section, "quarantine_days", 14)),
@@ -123,6 +133,12 @@ quarantine_threshold = 0.4
 # are damped so a test seen 3 times cannot outrank one seen 200 times on the
 # same evidence.
 confidence_runs = 10
+
+# How many preceding tests to search when looking for a polluter. Wider finds
+# polluters further back; because every extra candidate tightens the significance
+# threshold all of them must clear, it also costs precision. Measured, not guessed:
+# see `flaky benchmark --sweep window`.
+order_window = 6
 
 # Consecutive passes after which a previously flaky test is reported as fixed.
 fixed_run_streak = 10
