@@ -10,6 +10,18 @@ shows the evidence.**
 Works from the JUnit XML your test runner already produces. Measures its own accuracy, so
 you know how often the answer is wrong.
 
+### ▶ Try it without installing anything
+
+| | |
+|---|---|
+| **[Live dashboard](https://ahmedhashmu.github.io/flaky-test-detective/dashboard/)** | The real dashboard — the same compiled bundle the package ships. Open a test to see its evidence split into *proven* and *inferred*. |
+| **[Sample report](https://ahmedhashmu.github.io/flaky-test-detective/report.html)** | The standalone HTML export, one self-contained file, no CDN. |
+| **[What the data is](https://ahmedhashmu.github.io/flaky-test-detective/)** | Read this first. The hosted history is **generated**, not from a real suite. |
+
+The hosted history is generated so that a public demo carries nobody's test data; the
+*analysis* over it is the same `analyze()` the CLI runs. The measured accuracy claims below
+are separate, and reproducible by command.
+
 ```
 score  verdict     runs      p/f  flips  commit  cause      test
  0.91  flaky         20    10/10     13     1/1  timeout    test_timing.py::test_worker_fin…
@@ -84,7 +96,8 @@ Full detail, including the trust-score arithmetic: **[docs/dashboard.md](docs/da
 
 ## Contents
 
-- [Try it in two commands](#try-it-in-two-commands) ·
+- [Try it without installing anything](#-try-it-without-installing-anything) ·
+  [Try it in two commands](#try-it-in-two-commands) ·
   [The dashboard](#the-dashboard) · [The problem](#the-problem) ·
   [What's different](#whats-different) · [Measured accuracy](#measured-accuracy) ·
   [Validated on real repositories](#validated-on-real-repositories)
