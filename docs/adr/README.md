@@ -26,6 +26,7 @@ what changed is the part that transfers.
 | [0015](0015-reproduce-by-experiment-not-correlation.md) | Reproduce by experiment, because correlation has a measured ceiling | Accepted |
 | [0016](0016-assert-relationships-not-only-examples.md) | Assert relationships, not only examples | Accepted |
 | [0017](0017-windows-is-a-supported-platform.md) | Windows is a supported platform, and the test suite could not have told us | Accepted |
+| [0018](0018-capture-real-runner-output.md) | Capture real runner output, because a faithful fixture is not the same thing | Accepted |
 
 ## Format
 

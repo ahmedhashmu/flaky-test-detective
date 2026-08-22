@@ -653,9 +653,12 @@ Stated plainly, because a tool about trustworthy signals should be honest about 
 - **The benchmark uses synthetic data.** Real flakiness clusters; the generator models
   independent draws.
 - **JUnit XML only.** No TAP or Allure yet.
-- **go, Surefire and .NET parsers are unvalidated against live runners** — those
-  toolchains were unavailable. Provenance per fixture in
-  [tests/fixtures/README.md](tests/fixtures/README.md).
+- **Surefire and .NET parsers are unvalidated against live runners** — no JVM or .NET SDK
+  was available. pytest, jest and go are validated against captured real output; provenance
+  per fixture is in [tests/fixtures/README.md](tests/fixtures/README.md). Go was on this
+  list until its output was captured, and doing so found a real defect
+  ([ADR-0018](docs/adr/0018-capture-real-runner-output.md)), which is why the caveat stays
+  on the other two rather than being waved away.
 - **`flaky reproduce` is pytest-only.** It needs a runner that accepts an ordered list of
   tests and honours that order. Other runners get a usage error naming the limitation, not
   a silent wrong answer. Reproduction has also **not** been evaluated against the twelve
@@ -778,7 +781,7 @@ uv sync
 Substitute `pip install -e ".[dev]"` for `uv sync` and drop the `uv run` prefixes to use
 pip instead.
 
-**1. Test suite** — 1,060 tests, about 30 seconds:
+**1. Test suite** — 1,074 tests, about 30 seconds:
 
 ```sh
 uv run pytest
