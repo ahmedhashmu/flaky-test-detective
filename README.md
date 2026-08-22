@@ -668,7 +668,7 @@ Stated plainly, because a tool about trustworthy signals should be honest about 
 Built with Kiro using its spec-driven workflow. `.kiro/` is the record, and it is worth
 reading rather than taking on trust.
 
-**Three specs, not one.** Each round started from a review of the finished previous one, so
+**Four specs, not one.** Each round started from a review of the finished previous one, so
 `.kiro/specs/` is a record of the workflow used *iteratively* under new requirements rather
 than once at the start.
 
@@ -677,16 +677,21 @@ than once at the start.
 | 1 | [`flaky-test-detective/`](.kiro/specs/flaky-test-detective/) | Nothing existed. 37 numbered requirements, a design document, 20 tasks. |
 | 2 | [`accuracy-and-adoption/`](.kiro/specs/accuracy-and-adoption/) | The tool could not prove its own accuracy, history could not be shared across machines, and CI adoption took too many steps. |
 | 3 | [`product-layer/`](.kiro/specs/product-layer/) | It was an impressive CLI. Its strongest capability — separating known flakes from genuine breakage — was one line of console output. |
+| 4 | [`investigation-engine/`](.kiro/specs/investigation-engine/) | A market check found same-commit divergence is **not** a differentiator — BuildPulse and Trunk already do it. And validation against real repositories showed diagnosis at 11.6% where the generated benchmark had claimed 100%. |
 
-Each spec's `tasks.md` ends with a **"what the plan got wrong"** section. Those are the
-useful part: three rounds of requirements that were written confidently and then corrected
-by a measurement.
+Each spec's `tasks.md` ends with a section on what the plan got wrong, or what was left
+undone and why. Those are the useful part: four rounds of requirements written confidently
+and then corrected by a measurement.
+
+Round 4 is also the honest one about process. It ran from a task list rather than a
+pre-written spec, and its `requirements.md` says so in the second paragraph rather than
+presenting the consolidation as though it had come first.
 
 **Steering shaped every file.** [`.kiro/steering/`](.kiro/steering/) holds three always-on
 documents: `product.md` (the "never cry wolf" principle and a fixed vocabulary),
 `tech.md` (XML safety, error-handling categories, parameterized SQL, determinism), and
 `structure.md` (the one-way dependency direction). Those are not decoration —
-[`tests/test_architecture.py`](tests/test_architecture.py) turns them into 113 enforced
+[`tests/test_architecture.py`](tests/test_architecture.py) turns them into 148 enforced
 checks, so a rule broken under time pressure fails the build instead of quietly decaying.
 
 **Hooks.** [`.kiro/hooks/`](.kiro/hooks/): lint on save, an architecture guard that fires on
@@ -696,8 +701,8 @@ and the fast test suite after each spec task.
 ### The part worth actually looking at
 
 The most valuable thing Kiro did was **catch its own mistakes by measuring output against
-ground truth**. Six rules were written, tested, found wrong, and rewritten. All are
-documented with the measurements in [`docs/adr/`](docs/adr/):
+ground truth**. Eight rules or checks were written, tested, found wrong, and rewritten. All
+are documented with the measurements in [`docs/adr/`](docs/adr/):
 
 1. **Order dependence, twice.** v1 flagged a purely random test as order-dependent. v2
    flagged 8 of 10 demo tests with 100% reported confidence. The measurement that settled
@@ -724,10 +729,29 @@ documented with the measurements in [`docs/adr/`](docs/adr/):
    docs, the docstrings and the UI tooltip all claimed something untrue. →
    [ADR-0009](docs/adr/0009-explainable-trust-score.md)
 
-A flaky test was also found in **this project's own suite**: CLI assertions searched for
-phrases in rich-formatted output, which wraps to the terminal, so `"DOCTYPE or ENTITY"`
-passed in a wide shell and failed in a narrow one. Exactly the class of bug the tool
-exists to find, sitting in the tool.
+7. **Two components built from the same belief agreed with each other.** The generated
+   benchmark scored order-dependence precision and recall at 1.000, because it placed every
+   polluter immediately before its victim — which was the detector's own assumption. Real
+   repositories put diagnosis at **11.6%**. Widening the search then worked on generated data
+   (3.5× more polluters named) and did **nothing** on real code, so the negative result was
+   published rather than dropped, along with the gate table showing where the real ceiling is.
+   That number is what motivated `flaky reproduce`. →
+   [ADR-0014](docs/adr/0014-search-a-window-for-the-polluter.md)
+8. **A green CI run would have certified a bug.** Before adding `windows-latest`, an audit
+   found that `flaky verify > verify.log` raises `UnicodeEncodeError` on Windows, because
+   Python encodes a redirected stdout with the locale codepage and the failure-rate bars use
+   block characters. No test could have caught it: pytest replaces `sys.stdout` with a UTF-8
+   buffer, so the encoding is never wrong inside the suite. CI now also runs the installed
+   console script with redirected, cp1252 output. The matrix then found two more defects the
+   audit had missed, including `flaky serve` silently starting a second server on an occupied
+   port. → [ADR-0017](docs/adr/0017-windows-is-a-supported-platform.md)
+
+Twice the *fix* was the bug. The first version of that encoding fix ran at module import,
+where reconfiguring the stream detached the buffer pytest was writing to — the whole 937-test
+suite produced no output at all and exited 1. And a flaky test was found in **this project's
+own suite**: CLI assertions searched for phrases in rich-formatted output, which wraps to the
+terminal, so `"DOCTYPE or ENTITY"` passed in a wide shell and failed in a narrow one. Exactly
+the class of bug the tool exists to find, sitting in the tool.
 
 ## Testing instructions
 
@@ -754,7 +778,7 @@ uv sync
 Substitute `pip install -e ".[dev]"` for `uv sync` and drop the `uv run` prefixes to use
 pip instead.
 
-**1. Test suite** — 968 tests, about 30 seconds:
+**1. Test suite** — 1,060 tests, about 30 seconds:
 
 ```sh
 uv run pytest
@@ -1034,7 +1058,7 @@ fixtures were written to their documented formats, with provenance recorded in
 | [docs/real-world.md](docs/real-world.md) | Validation on 12 real repositories with published labels |
 | [docs/ci-integration.md](docs/ci-integration.md) | Recipes, including sharded builds |
 | [docs/adr/](docs/adr/) | Decision records, including the ones that were wrong first |
-| [.kiro/specs/](.kiro/specs/) | Requirements, design and tasks for all three rounds |
+| [.kiro/specs/](.kiro/specs/) | Requirements, design and tasks for all four rounds |
 
 ## License
 
