@@ -483,6 +483,96 @@ regression to clear it and loose enough not to fire on noise.
 """
 
 
+class FixOutcome(StrEnum):
+    """Whether a candidate fix can be believed.
+
+    Three values, not two. "Not yet provable" is a different and much more common answer
+    than "not fixed", and collapsing them would make the tool either pessimistic about
+    real fixes or credulous about lucky streaks.
+    """
+
+    FIXED = "fixed"
+    """Clean for longer than the old failure rate explains, with the failing conditions
+    actually exercised and nothing else broken."""
+
+    NOT_FIXED = "not_fixed"
+    """Still failing."""
+
+    INCONCLUSIVE = "inconclusive"
+    """Clean, and not yet clean enough to say -- or clean for the wrong reason."""
+
+
+@dataclass(frozen=True, slots=True)
+class FixVerification:
+    """The evidence for or against a candidate fix."""
+
+    test_id: str
+    outcome: FixOutcome
+    before: TestAnalysis
+    after: TestAnalysis
+
+    old_rate_bound: float = 0.0
+    """Lower confidence bound on the old failure rate.
+
+    The conservative direction when claiming an improvement: assuming the old rate was as
+    low as its data allows makes a clean streak less surprising, so the fix has to work
+    harder to be believed.
+    """
+
+    probability: float = 1.0
+    """Chance of a streak this clean, if the old rate were unchanged."""
+
+    runs_needed: int = 0
+    """Clean runs required to clear the bar at the old rate.
+
+    The actionable number. A test that failed 35% of the time needs 8; one that failed 2%
+    of the time needs 149, and that is the one people declare fixed after three.
+    """
+
+    polluter: str | None = None
+    polluter_exposures: int | None = None
+    """Times the polluter ran ahead of this test in the new runs. None if not applicable."""
+
+    exposures_needed: int = 0
+    collateral: tuple[str, ...] = ()
+    """Tests this change made flaky or broke. A fix that moves the problem is not a fix."""
+
+    explanation: str = ""
+
+    @property
+    def is_fixed(self) -> bool:
+        return self.outcome is FixOutcome.FIXED
+
+    @property
+    def clean_runs(self) -> int:
+        return self.after.runs if self.after.failures == 0 else 0
+
+    @property
+    def rate_reduction(self) -> float:
+        """Percentage points of failure rate removed. Negative means it got worse."""
+        return self.before.failure_rate - self.after.failure_rate
+
+    @property
+    def failures_avoided(self) -> int:
+        """Failures the old rate would have produced over the new runs, minus what happened.
+
+        A counterfactual over runs that actually took place, not a projection into the
+        future: at the old observed rate these runs would have produced roughly this many
+        failures, and they produced fewer. Still an estimate, and labelled as one wherever
+        it is displayed, because a rate measured over one window does not have to hold in
+        the next.
+        """
+        expected = self.before.failure_rate * self.after.runs
+        return max(0, round(expected - self.after.failures))
+
+    @property
+    def exposures_sufficient(self) -> bool:
+        """Was the sequence that used to fail actually attempted often enough?"""
+        if self.polluter_exposures is None:
+            return True
+        return self.polluter_exposures >= self.exposures_needed
+
+
 class Attribution(StrEnum):
     """How much the recorded history can say about when flakiness started."""
 

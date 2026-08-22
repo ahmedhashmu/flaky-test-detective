@@ -21,6 +21,7 @@ what changed is the part that transfers.
 | [0010](0010-dashboard-on-the-standard-library.md) | Ship the dashboard in the package, on the standard library | Accepted |
 | [0011](0011-validate-against-real-repositories.md) | Validate against real repositories, using labels we did not write | Accepted |
 | [0012](0012-attribute-flakiness-to-a-branch.md) | Attribute flakiness to a branch, against the baseline's own uncertainty | Accepted |
+| [0013](0013-verify-fixes-against-three-conditions.md) | A fix is verified against three conditions, not one | Accepted |
 
 ## Format
 

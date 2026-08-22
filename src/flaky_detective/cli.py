@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 import threading
+from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -31,19 +32,22 @@ from .analysis import analyze_one
 from .analysis import compare as compare_histories
 from .analysis import triage as triage_run
 from .analysis.attribution import blame as blame_test
+from .analysis.verification import count_exposures, verify_fix
 from .benchmark import realworld, run_benchmark
 from .benchmark import sweep as run_sweep
 from .config import EXAMPLE_CONFIG, Config, load_config
 from .environment import detect
 from .ingest import ingest_paths, junit
-from .models import AnalysisReport, TestOutcome, Verdict
-from .quarantine import EXPORT_FORMATS, Quarantine, recommend, verify
+from .models import AnalysisReport, FixOutcome, TestAnalysis, TestOutcome, Verdict
+from .quarantine import EXPORT_FORMATS, Quarantine, recommend
 from .quarantine import export as export_quarantine
+from .quarantine import verify as verify_quarantine
 from .report import benchmark_report
 from .report import comparison as comparison_report
 from .report import console as console_report
 from .report import issue as issue_report
 from .report import validation as validation_report
+from .report import verification as verification_report
 from .runner import HuntError
 from .storage import Storage, StorageError
 
@@ -440,6 +444,258 @@ def triage(
     if result.new_failures:
         raise typer.Exit(EXIT_REGRESSION if fail_on == "regression" else EXIT_FLAKY)
     raise typer.Exit(EXIT_OK)
+
+
+@app.command(
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def verify(
+    ctx: typer.Context,
+    test_id: Annotated[str, typer.Argument(help="Full test id, or any part of one.")],
+    runs: Annotated[
+        int, typer.Option("-n", "--runs", help="Iterations to run now, when a command is given.")
+    ] = 30,
+    since: Annotated[
+        str | None,
+        typer.Option("--since", help="Treat runs on or after this ISO timestamp as 'after'."),
+    ] = None,
+    after_commit: Annotated[
+        str | None,
+        typer.Option("--after-commit", help="Split the history at this commit's first run."),
+    ] = None,
+    shuffle: Annotated[
+        bool,
+        typer.Option("--shuffle/--no-shuffle", help="Randomize test order between runs."),
+    ] = True,
+    seed: Annotated[
+        int | None, typer.Option("--seed", help="Base seed, so a verification can be replayed.")
+    ] = None,
+    fmt: Annotated[str, typer.Option("--format", "-f", help="console, md, or json.")] = "console",
+    output: Annotated[
+        Path | None, typer.Option("--output", "-o", help="Write here instead of stdout.")
+    ] = None,
+    db: DbOption = None,
+    config: ConfigOption = None,
+    threshold: ThresholdOption = None,
+) -> None:
+    """Prove a fix worked, or say plainly that it cannot be proved yet.
+
+    Three ways to say where the fix landed:
+
+        flaky verify test_worker_finish -n 50 -- pytest tests/   run now, compare to history
+        flaky verify test_worker_finish --after-commit a3f2c91   split recorded history
+        flaky verify test_worker_finish --since 2026-08-01       split at a timestamp
+
+    A clean streak is not enough on its own. Three things have to hold: the streak has to
+    be longer than the old failure rate explains, the conditions that used to fail have to
+    have actually occurred, and nothing else can have broken. Declaring a flake fixed on
+    three green runs is how a test gets back into the trusted set and then confuses
+    everyone the next time it fails.
+    """
+    settings = _settings(config, db, threshold)
+    command = [arg for arg in ctx.args if arg != "--"]
+
+    if command and (since or after_commit):
+        stderr.print(
+            "Give either a command to run, or --since/--after-commit to split existing "
+            "history. Not both."
+        )
+        raise typer.Exit(EXIT_USAGE)
+
+    with _storage(settings) as store:
+        resolved = _resolve_test_id(store, test_id)
+
+    if command:
+        cutoff = _hunt_for_verification(settings, command, runs, shuffle, seed)
+    elif after_commit:
+        cutoff = _commit_cutoff(settings, after_commit)
+    elif since:
+        cutoff = since
+    else:
+        stderr.print(
+            "Nothing to verify against. Either run the suite now:\n"
+            f'  flaky verify "{resolved}" -n 30 -- pytest tests/\n'
+            "or point at where the fix landed:\n"
+            f'  flaky verify "{resolved}" --after-commit <sha>'
+        )
+        raise typer.Exit(EXIT_USAGE)
+
+    with _storage(settings) as store:
+        everything = store.outcomes()
+
+    boundary = _instant(cutoff)
+    if boundary is None:
+        stderr.print(
+            f"Could not read {cutoff!r} as a date or timestamp. Use an ISO form such as "
+            "2026-08-01 or 2026-08-01T14:30:00."
+        )
+        raise typer.Exit(EXIT_USAGE)
+
+    # Split on parsed instants, never on the raw strings. Recorded timestamps carry
+    # whatever UTC offset the machine had, so "2026-08-22T15:47+05:00" sorts *after*
+    # "2026-08-22T10:53+00:00" as text while being two hours earlier in fact. Comparing
+    # strings put every run on the wrong side of the boundary.
+    before_outcomes = [o for o in everything if _before(o.started_at, boundary)]
+    after_outcomes = [o for o in everything if not _before(o.started_at, boundary)]
+
+    if not before_outcomes:
+        stderr.print(f"No runs recorded before {cutoff}. There is no 'before' to compare against.")
+        raise typer.Exit(EXIT_USAGE)
+    if not after_outcomes:
+        stderr.print(f"No runs recorded on or after {cutoff}.")
+        raise typer.Exit(EXIT_USAGE)
+
+    before_report = analyze_outcomes(before_outcomes, settings)
+    after_report = analyze_outcomes(after_outcomes, settings)
+
+    before = next((t for t in before_report.tests if t.test_id == resolved), None)
+    after = next((t for t in after_report.tests if t.test_id == resolved), None)
+
+    if before is None:
+        stderr.print(f"{resolved} has no recorded runs before {cutoff}.")
+        raise typer.Exit(EXIT_USAGE)
+    if after is None:
+        stderr.print(
+            f"{resolved} did not run on or after {cutoff}. A test that no longer runs is "
+            "not a test that was fixed."
+        )
+        raise typer.Exit(EXIT_USAGE)
+
+    exposures = _polluter_exposures(resolved, before, after_outcomes)
+    # The whole-suite comparison across the same split, so a fix that made this test
+    # stable by breaking something else cannot be reported as a success.
+    collateral = compare_histories(before_report, after_report)
+
+    result = verify_fix(before, after, polluter_exposures=exposures, collateral=collateral)
+
+    if fmt == "console":
+        verification_report.render_console(result, stdout)
+    else:
+        try:
+            _emit(verification_report.render(result, fmt), output)
+        except ValueError as exc:
+            stderr.print(str(exc))
+            raise typer.Exit(EXIT_USAGE) from exc
+
+    if result.outcome is FixOutcome.NOT_FIXED:
+        raise typer.Exit(EXIT_FLAKY)
+    raise typer.Exit(EXIT_OK)
+
+
+def _instant(value: str) -> datetime | None:
+    """Parse an ISO date or timestamp into a comparable instant.
+
+    A naive timestamp is assumed to be local time, because that is what the recorder
+    writes when the machine has no offset configured. A bare date becomes midnight local.
+    """
+    try:
+        parsed = datetime.fromisoformat(value.strip())
+    except ValueError:
+        return None
+    return parsed.astimezone() if parsed.tzinfo is None else parsed
+
+
+def _before(started_at: str | None, boundary: datetime) -> bool:
+    """Is this outcome from before the boundary?
+
+    An outcome with no timestamp is treated as older than any boundary: it was recorded
+    by something that did not report a time, so it cannot be part of a fix made now.
+    """
+    if not started_at:
+        return True
+    moment = _instant(started_at)
+    return True if moment is None else moment < boundary
+
+
+def _hunt_for_verification(
+    settings: Config, command: list[str], runs: int, shuffle: bool, seed: int | None
+) -> str:
+    """Run the suite now and return the timestamp that separates before from after.
+
+    The cutoff is taken before the first iteration starts, so every run this hunt records
+    lands in the 'after' window and nothing already in the database can drift into it.
+    """
+    cutoff = datetime.now().astimezone().isoformat()
+
+    try:
+        plan = runner.plan_hunt(
+            command, iterations=runs, shuffle=shuffle, cwd=Path.cwd(), base_seed=seed
+        )
+    except HuntError as exc:
+        stderr.print(str(exc))
+        raise typer.Exit(EXIT_USAGE) from exc
+
+    # Progress goes to stderr throughout: stdout may be a JSON or Markdown report, and
+    # interleaving iteration lines into it produced output no parser could read.
+    stderr.print(
+        f"Verifying with {plan.runner}: {runs} iterations, "
+        f"order randomization {'on' if plan.shuffle_effective else 'off'}."
+    )
+    if not plan.shuffle_effective:
+        stderr.print(
+            "Note: order randomization is off, so an order-dependent fix cannot be "
+            "verified. Install pytest-randomly or pytest-random-order.",
+            style="yellow",
+        )
+
+    def progress(result: runner.IterationResult) -> None:
+        if result.run is not None:
+            stderr.print(
+                f"  {result.iteration:>3}/{runs}  {result.duration:>5.1f}s  "
+                f"{result.run.failed:>3} failed",
+                style="dim",
+            )
+
+    with _storage(settings) as store:
+        summary = runner.run_hunt(plan, store, settings, environment=detect(), progress=progress)
+
+    if summary.collected == 0:
+        stderr.print("No iterations produced a usable report.")
+        raise typer.Exit(EXIT_USAGE)
+
+    stderr.print()
+    return cutoff
+
+
+def _commit_cutoff(settings: Config, commit: str) -> str:
+    """First recorded timestamp for a commit, used as the before/after boundary."""
+    with _storage(settings) as store:
+        outcomes = store.outcomes()
+
+    matching = [
+        o.started_at
+        for o in outcomes
+        if o.commit_sha and o.started_at and o.commit_sha.startswith(commit)
+    ]
+    if not matching:
+        stderr.print(
+            f"No runs recorded at a commit starting {commit!r}. "
+            "Check `flaky stats` for what is in the database."
+        )
+        raise typer.Exit(EXIT_USAGE)
+
+    return min(matching)
+
+
+def _polluter_exposures(
+    test_id: str, before: TestAnalysis, after_outcomes: list[TestOutcome]
+) -> int | None:
+    """How often the old polluter preceded this test in the new runs.
+
+    None when the test was never diagnosed as order dependent, which means the question
+    does not apply rather than that the answer is zero.
+    """
+    if before.order is None or not before.order.likely_polluter:
+        return None
+
+    from .analysis.ordering import build_predecessor_index
+
+    return count_exposures(
+        test_id,
+        before.order.likely_polluter,
+        after_outcomes,
+        build_predecessor_index(after_outcomes),
+    )
 
 
 @app.command()
@@ -1076,7 +1332,7 @@ def quarantine_verify(
         return
 
     result = _analyze(settings, since=since, branch=None, last=None)
-    outcome = verify(store, result, config=settings)
+    outcome = verify_quarantine(store, result, config=settings)
 
     if outcome.releasable:
         stdout.print("Now stable, safe to release:", style="green")

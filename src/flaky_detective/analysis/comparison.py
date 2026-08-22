@@ -33,14 +33,14 @@ broke something it did not touch.
 
 Same reasoning as the streak rule in `flakiness.py` and the polluter rule in
 `ordering.py` -- beat chance, not just the observed number -- with an exact binomial
-instead of a power, because here the baseline count is not always zero.
+instead of a power, because here the baseline count is not always zero. The binomial
+machinery lives in `statistics.py`, shared with fix verification, which asks the same
+question with the sign reversed.
 
 Pure, like the rest of `analysis/`: two analyses in, one comparison out.
 """
 
 from __future__ import annotations
-
-import math
 
 from ..models import (
     MIN_BASELINE_RUNS,
@@ -51,6 +51,7 @@ from ..models import (
     TestComparison,
     Verdict,
 )
+from .statistics import tail_at_least, upper_bound
 
 ALPHA = 0.05
 """How improbable the new failures must be, under the baseline's upper bound.
@@ -67,14 +68,6 @@ MIN_HEAD_RUNS = 5
 
 Below this, `probability` is dominated by the sample size rather than the behaviour: two
 failures in three runs is not evidence of anything, whatever the baseline looked like.
-"""
-
-MAX_EXACT_RUNS = 2000
-"""Above this the exact binomial is skipped for a normal approximation.
-
-Nobody hunts 2000 iterations, so this is a guard against a pathological input rather
-than a routine path, and it exists because `math.comb` on huge n is slow enough to make
-a CI step look hung.
 """
 
 
@@ -178,8 +171,8 @@ def _compare_one(baseline: TestAnalysis | None, head: TestAnalysis) -> TestCompa
             ),
         )
 
-    bound = _upper_bound(baseline.failures, baseline.runs)
-    probability = _tail_at_least(head.failures, head.runs, bound)
+    bound = upper_bound(baseline.failures, baseline.runs, ALPHA)
+    probability = tail_at_least(head.failures, head.runs, bound)
     significant = probability <= ALPHA
     was_flaky = baseline.verdict is Verdict.FLAKY
 
@@ -407,69 +400,3 @@ def _entry(
         probability=round(probability, 6),
         explanation=explanation,
     )
-
-
-def _upper_bound(failures: int, runs: int, alpha: float = ALPHA) -> float:
-    """Highest failure rate consistent with `failures` in `runs`, at 1 - alpha.
-
-    The Clopper-Pearson upper limit, found by bisection rather than pulled from a
-    library, because adding scipy to read test reports is not a trade this project makes.
-
-    For zero failures it reduces to a closed form: the largest rate under which a clean
-    run of `runs` still has probability alpha. That is the familiar rule of three -- no
-    failures in 40 runs means the true rate could still be about 7%.
-    """
-    if runs <= 0:
-        return 1.0
-    if failures >= runs:
-        return 1.0
-    if failures == 0:
-        return 1.0 - alpha ** (1.0 / runs)
-
-    low, high = failures / runs, 1.0
-    # 60 halvings takes the interval below float resolution; a fixed count keeps this
-    # deterministic, which analysis output has to be.
-    for _ in range(60):
-        middle = (low + high) / 2.0
-        if _cdf_at_most(failures, runs, middle) > alpha:
-            low = middle
-        else:
-            high = middle
-    return high
-
-
-def _cdf_at_most(successes: int, trials: int, rate: float) -> float:
-    """P(X <= successes) for X ~ Binomial(trials, rate)."""
-    if rate <= 0.0:
-        return 1.0
-    if rate >= 1.0:
-        return 1.0 if successes >= trials else 0.0
-
-    total = 0.0
-    for count in range(min(successes, trials) + 1):
-        total += math.comb(trials, count) * rate**count * (1.0 - rate) ** (trials - count)
-    return min(1.0, total)
-
-
-def _tail_at_least(successes: int, trials: int, rate: float) -> float:
-    """P(X >= successes) for X ~ Binomial(trials, rate)."""
-    if successes <= 0:
-        return 1.0
-    if trials <= 0:
-        return 1.0
-    if successes > trials:
-        return 0.0
-    if trials > MAX_EXACT_RUNS:
-        return _normal_tail(successes, trials, rate)
-    return max(0.0, 1.0 - _cdf_at_most(successes - 1, trials, rate))
-
-
-def _normal_tail(successes: int, trials: int, rate: float) -> float:
-    """Normal approximation, used only for implausibly large run counts."""
-    mean = trials * rate
-    spread = math.sqrt(trials * rate * (1.0 - rate))
-    if spread <= 0.0:
-        return 1.0 if successes <= mean else 0.0
-    # Continuity correction, then the complementary error function.
-    z = (successes - 0.5 - mean) / spread
-    return 0.5 * math.erfc(z / math.sqrt(2.0))

@@ -22,13 +22,7 @@ import pytest
 
 from flaky_detective.analysis import analyze
 from flaky_detective.analysis import compare as compare_reports
-from flaky_detective.analysis.comparison import (
-    ALPHA,
-    MIN_HEAD_RUNS,
-    _cdf_at_most,
-    _tail_at_least,
-    _upper_bound,
-)
+from flaky_detective.analysis.comparison import MIN_HEAD_RUNS
 from flaky_detective.config import Config
 from flaky_detective.models import Change, ComparisonReport
 from flaky_detective.report import comparison as comparison_report
@@ -60,55 +54,6 @@ def one(result: ComparisonReport, fragment: str):
 
 COMMITS_20 = ["c1"] * 20
 COMMITS_40 = ["c1"] * 40
-
-
-class TestStatistics:
-    def test_zero_failures_uses_the_closed_form(self) -> None:
-        """No failures in n runs still admits a rate near 3/n -- the rule of three.
-
-        The single most important number in this module: it is what stops a clean
-        baseline being treated as proof of a zero failure rate.
-        """
-        bound = _upper_bound(0, 40)
-        assert bound == pytest.approx(1.0 - ALPHA ** (1 / 40))
-        assert 0.06 < bound < 0.08, bound
-
-    def test_bound_tightens_as_the_baseline_grows(self) -> None:
-        assert _upper_bound(0, 10) > _upper_bound(0, 40) > _upper_bound(0, 200)
-
-    def test_bound_with_failures_brackets_the_observed_rate(self) -> None:
-        """Bisection result must sit above the observed rate and below one."""
-        bound = _upper_bound(5, 40)
-        assert 5 / 40 < bound < 1.0
-        # And it must be the point where the CDF equals alpha, which is what makes it a
-        # confidence bound rather than an arbitrary inflation.
-        assert _cdf_at_most(5, 40, bound) == pytest.approx(ALPHA, abs=1e-3)
-
-    def test_bound_is_one_when_everything_failed(self) -> None:
-        assert _upper_bound(10, 10) == 1.0
-
-    def test_bound_handles_an_empty_baseline(self) -> None:
-        assert _upper_bound(0, 0) == 1.0
-
-    def test_cdf_endpoints(self) -> None:
-        assert _cdf_at_most(10, 10, 0.5) == pytest.approx(1.0)
-        assert _cdf_at_most(0, 10, 0.0) == pytest.approx(1.0)
-        assert _cdf_at_most(4, 10, 1.0) == 0.0
-
-    def test_tail_is_one_for_zero_successes(self) -> None:
-        assert _tail_at_least(0, 20, 0.1) == 1.0
-
-    def test_tail_shrinks_as_observed_failures_grow(self) -> None:
-        rate = 0.07
-        assert _tail_at_least(3, 40, rate) > _tail_at_least(8, 40, rate)
-        assert _tail_at_least(20, 40, rate) < 1e-6
-
-    def test_tail_of_more_than_all_trials_is_zero(self) -> None:
-        assert _tail_at_least(21, 20, 0.5) == 0.0
-
-    def test_large_run_counts_do_not_use_the_exact_binomial(self) -> None:
-        """Guard against math.comb on a pathological n making a CI step look hung."""
-        assert 0.0 <= _tail_at_least(1500, 5000, 0.25) <= 1.0
 
 
 class TestIntroduced:

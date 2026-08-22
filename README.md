@@ -118,6 +118,11 @@ teardown".
 and cleared for what was already broken. Blocking people for pre-existing flakes is how
 CI gates get switched off.
 
+**It closes the loop.** `flaky verify` decides whether a fix actually worked. A test that
+failed 35% of the time needs 8 clean runs to prove it; one that failed 2% of the time needs
+**149**, and that is the one people declare fixed after three. The tool states the number
+instead of leaving you to guess it.
+
 **It works for any language.** The tool reads JUnit XML and never reads your source, so
 pytest, jest, go, JUnit, Gradle and .NET all work without it knowing anything about them.
 
@@ -325,6 +330,7 @@ the evidence of itself to argue it is flaky.
 | `flaky analyze` | Ranked flakes with diagnosis |
 | `flaky triage <report>` | Known flakes vs new breakage for one run |
 | `flaky compare` | Did *this branch* introduce flakiness, or inherit it |
+| `flaky verify <test-id>` | Prove a fix worked, or say why it cannot be proved yet |
 | `flaky blame <test-id>` | Which commit introduced the flakiness |
 | `flaky merge <sources…>` | Pool history from other machines or CI shards |
 | `flaky benchmark` | Measure this tool's own accuracy against generated ground truth |
@@ -635,7 +641,7 @@ uv sync
 Substitute `pip install -e ".[dev]"` for `uv sync` and drop the `uv run` prefixes to use
 pip instead.
 
-**1. Test suite** — 731 tests, about 16 seconds:
+**1. Test suite** — 787 tests, about 16 seconds:
 
 ```sh
 uv run pytest
@@ -735,7 +741,32 @@ Then three things worth checking, because they are where this is easy to get wro
 - Some tests land in "not enough evidence to attribute". That is the intended answer at 20
   runs a side, not a bug. Re-record the baseline with `-n 60` and watch them move.
 
-**7. Triage**, the CI gate:
+**7. Watch it refuse to certify a fix it cannot prove.** Record flaky history, then "fix"
+the tests by switching the demo suite to deterministic mode:
+
+```sh
+uv run flaky hunt -n 30 --db /tmp/fix.db -- \
+  uv run pytest examples/flaky_demo -p no:cacheprovider -q
+
+TEST=examples/flaky_demo/test_timing.py::test_worker_finishes_within_deadline
+
+FLAKY_DEMO_DETERMINISTIC=1 uv run flaky verify "$TEST" -n 4  --db /tmp/fix.db -- \
+  uv run pytest examples/flaky_demo -p no:cacheprovider -q
+
+FLAKY_DEMO_DETERMINISTIC=1 uv run flaky verify "$TEST" -n 40 --db /tmp/fix.db -- \
+  uv run pytest examples/flaky_demo -p no:cacheprovider -q
+```
+
+The first call is 4 for 4 clean and reports **Cannot say yet**, naming how many clean runs
+the old failure rate actually requires. The second clears that bar and reports **Fixed**,
+with the probability of the streak, the failure rate before and after, and a check that
+nothing else broke.
+
+That refusal is the feature. A clean streak is only evidence in proportion to the rate it
+is replacing, and for an order-dependent flake it is worth nothing at all unless the
+polluting order was actually exercised — which `verify` also counts.
+
+**8. Triage**, the CI gate:
 
 ```sh
 uv run pytest examples/flaky_demo -q --junitxml=/tmp/run.xml ; true
@@ -745,7 +776,7 @@ uv run flaky triage /tmp/run.xml --db /tmp/demo.db ; echo "exit: $?"
 Several tests failed; it should report only `test_known_broken` as needing attention, and
 exit 2.
 
-**8. Merge history from two machines:**
+**9. Merge history from two machines:**
 
 ```sh
 uv run flaky hunt -n 6 --db /tmp/a.db -- uv run pytest examples/flaky_demo -q
@@ -754,7 +785,7 @@ uv run flaky merge /tmp/b.db --into /tmp/a.db     # 12 runs
 uv run flaky merge /tmp/b.db --into /tmp/a.db     # no-op, idempotent
 ```
 
-**9. Verify the quarantine export really works:**
+**10. Verify the quarantine export really works:**
 
 ```sh
 uv run flaky quarantine recommend --db /tmp/demo.db --apply
@@ -765,7 +796,7 @@ PYTHONPATH=/tmp/qp uv run pytest examples/flaky_demo -p qplugin -q -rs
 Quarantined tests are reported as skipped with a reason. `test_known_broken` still fails,
 because quarantine never hides a real failure.
 
-**10. Confirm this project's own suite is not flaky** — a reasonable thing to demand of this
+**11. Confirm this project's own suite is not flaky** — a reasonable thing to demand of this
 particular tool:
 
 ```sh
