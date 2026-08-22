@@ -117,6 +117,126 @@ class TestGoDialect:
         assert (run.total, run.failed, run.skipped) == (6, 2, 1)
 
 
+class TestGoCapturedFromGotestsum:
+    """Real `gotestsum --junitfile` output, captured from Go 1.27 on a live suite.
+
+    Worth its own class because capturing it found a defect the hand-written reference
+    fixture could not. Go wraps every failure in banner lines:
+
+        === RUN   TestExpectsCleanRegistry
+            basket_test.go:25: registry already contains 'session'
+        --- FAIL: TestExpectsCleanRegistry (0.00s)
+
+    `salient_line` took the last non-empty line on the stated belief that Go puts the
+    error there. It does not -- the last line is the `--- FAIL:` banner, which carries
+    the test's own name. So every Go failure got a unique signature, meaning signature
+    clustering could never group two Go tests, and `classify.py` saw no cause text and
+    returned `unknown` for all of them. The reference fixture missed it because whoever
+    wrote it put a sensible string in the `message` attribute instead of reproducing
+    Go's banners.
+    """
+
+    @pytest.fixture
+    def run(self, fixtures: Path):
+        return junit.parse_file(fixtures / "go-gotestsum.xml")
+
+    def test_detects_runner(self, run) -> None:
+        assert run.runner == "go"
+
+    def test_counts(self, run) -> None:
+        assert (run.total, run.failed, run.skipped) == (9, 4, 2)
+
+    def test_a_properties_block_does_not_break_parsing(self, run) -> None:
+        """gotestsum emits <properties> with go.version. It is not a test case."""
+        assert not any("go.version" in o.test_id for o in run.outcomes)
+
+    def test_the_real_assertion_text_becomes_the_message(self, run) -> None:
+        victim = next(o for o in run.outcomes if o.test_id.endswith("TestExpectsCleanRegistry"))
+        assert victim.message is not None
+        assert "registry already contains" in victim.message
+        assert "--- FAIL" not in victim.message
+        assert "=== RUN" not in victim.message
+
+    def test_no_failure_signature_contains_a_banner_or_a_test_name(self, run) -> None:
+        """The defect, stated as the thing that must not recur.
+
+        The parent-test case is excluded: Go reports a parent whose subtest failed with
+        banners only, so there is genuinely no message and the banner is the honest
+        answer.
+        """
+        failures = [
+            o
+            for o in run.outcomes
+            if o.status.is_failure and not o.test_id.endswith("TestUploadPaths")
+        ]
+        assert len(failures) == 3
+        for outcome in failures:
+            assert outcome.signature is not None
+            assert "--- FAIL" not in outcome.signature
+            assert "=== RUN" not in outcome.signature
+            leaf = outcome.test_id.rsplit("::", 1)[-1]
+            assert leaf not in outcome.signature, (
+                f"{leaf} leaked into its own signature, so it can never cluster with "
+                "another test failing the same way"
+            )
+
+    def test_two_tests_failing_the_same_way_share_a_signature(self, tmp_path: Path) -> None:
+        """The property the defect destroyed, checked through the real parse path.
+
+        Two different Go tests failing on the same cause must land in one cluster. The
+        banner-derived signature made that impossible, and it is the reason the bug
+        mattered rather than merely being untidy.
+        """
+        report = tmp_path / "go.xml"
+        report.write_text(
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<testsuites tests="2" failures="2">\n'
+            '  <testsuite name="pkg" tests="2" failures="2">\n'
+            '    <testcase classname="pkg" name="TestAlpha">\n'
+            '      <failure message="Failed" type="">=== RUN   TestAlpha&#xA;'
+            "    alpha_test.go:7: connection refused&#xA;"
+            "--- FAIL: TestAlpha (0.01s)&#xA;</failure>\n"
+            "    </testcase>\n"
+            '    <testcase classname="pkg" name="TestBeta">\n'
+            '      <failure message="Failed" type="">=== RUN   TestBeta&#xA;'
+            "    beta_test.go:12: connection refused&#xA;"
+            "--- FAIL: TestBeta (0.02s)&#xA;</failure>\n"
+            "    </testcase>\n"
+            "  </testsuite>\n"
+            "</testsuites>\n",
+            encoding="utf-8",
+        )
+
+        outcomes = junit.parse_file(report).outcomes
+        signatures = {o.signature for o in outcomes}
+        assert len(signatures) == 1, f"same cause, different signatures: {signatures}"
+
+    def test_subtests_keep_their_slash(self, run) -> None:
+        """Go names subtests parent/child, and that is the id a user would pass back."""
+        ids = [o.test_id for o in run.outcomes]
+        assert any(i.endswith("TestUploadPaths/large_file") for i in ids)
+        assert any(i.endswith("TestUploadPaths/small_file") for i in ids)
+
+    def test_a_failing_subtest_and_its_parent_are_separate_tests(self, run) -> None:
+        """Go reports both. Collapsing them would lose the specific failure."""
+        failed = {o.test_id.rsplit("::", 1)[-1] for o in run.outcomes if o.status.is_failure}
+        assert "TestUploadPaths" in failed
+        assert "TestUploadPaths/large_file" in failed
+
+    def test_a_skip_reason_is_one_line(self, run) -> None:
+        """gotestsum puts the whole banner block in the `message` attribute on a skip."""
+        skipped = [o for o in run.outcomes if o.status is Status.SKIPPED]
+        assert len(skipped) == 2
+        for outcome in skipped:
+            assert outcome.message is not None
+            assert "\n" not in outcome.message
+            assert "=== RUN" not in outcome.message
+
+    def test_the_timestamp_is_read_from_the_suite(self, run) -> None:
+        assert run.started_at is not None
+        assert run.started_at.startswith("2026-08-22T20:48:24")
+
+
 class TestSurefireDialect:
     @pytest.fixture
     def run(self, fixtures: Path):

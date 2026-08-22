@@ -134,10 +134,17 @@ class TestIngest:
         assert "skipped 1" in result.output
 
     def test_directory_ingest_skips_bad_files_and_continues(self, db: Path) -> None:
-        """The fixtures directory deliberately contains unusable reports."""
+        """The fixtures directory deliberately contains unusable reports.
+
+        The count is spelled out rather than derived, so adding a fixture makes this
+        fail and someone has to look. That is the intent: it is the check that a bad
+        report is skipped rather than silently counted.
+        """
         result = invoke("ingest", str(FIXTURES), "--db", str(db))
         assert result.exit_code == EXIT_OK
-        assert "Added 6 runs" in result.output
+        assert "Added 7 runs" in result.output
+        assert "truncated.xml" in result.output
+        assert "entity.xml" in result.output
 
     def test_reports_why_a_file_was_skipped(self, db: Path) -> None:
         result = invoke("ingest", str(FIXTURES / "entity.xml"), "--db", str(db))

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites tests="9" failures="4" errors="0" time="0.578144">
+	<testsuite tests="9" failures="4" skipped="2" time="0.578000" name="flakycheck" timestamp="2026-08-22T20:48:24+05:00">
+		<properties>
+			<property name="go.version" value="go1.27.0 darwin/arm64"></property>
+		</properties>
+		<testcase classname="flakycheck" name="TestExpectsCleanRegistry" time="0.000000">
+			<failure message="Failed" type="">=== RUN   TestExpectsCleanRegistry&#xA;    basket_test.go:25: registry already contains &#39;session&#39; -- state left behind by another test&#xA;--- FAIL: TestExpectsCleanRegistry (0.00s)&#xA;</failure>
+		</testcase>
+		<testcase classname="flakycheck" name="TestKnownBroken" time="0.000000">
+			<failure message="Failed" type="">=== RUN   TestKnownBroken&#xA;    basket_test.go:29: assertion failed: expected 3, got 4&#xA;--- FAIL: TestKnownBroken (0.00s)&#xA;</failure>
+		</testcase>
+		<testcase classname="flakycheck" name="TestUploadPaths/large_file" time="0.000000">
+			<failure message="Failed" type="">=== RUN   TestUploadPaths/large_file&#xA;    basket_test.go:46: timeout waiting for upload to complete&#xA;--- FAIL: TestUploadPaths/large_file (0.00s)&#xA;</failure>
+		</testcase>
+		<testcase classname="flakycheck" name="TestUploadPaths" time="0.000000">
+			<failure message="Failed" type="">=== RUN   TestUploadPaths&#xA;--- FAIL: TestUploadPaths (0.00s)&#xA;</failure>
+		</testcase>
+		<testcase classname="flakycheck" name="TestSkippedForNow" time="0.000000">
+			<skipped message="=== RUN   TestSkippedForNow&#xA;    basket_test.go:33: needs a network fixture&#xA;--- SKIP: TestSkippedForNow (0.00s)&#xA;"></skipped>
+		</testcase>
+		<testcase classname="flakycheck" name="TestUploadPaths/empty_file" time="0.000000">
+			<skipped message="=== RUN   TestUploadPaths/empty_file&#xA;    basket_test.go:49: not implemented&#xA;--- SKIP: TestUploadPaths/empty_file (0.00s)&#xA;"></skipped>
+		</testcase>
+		<testcase classname="flakycheck" name="TestSumsPrices" time="0.000000"></testcase>
+		<testcase classname="flakycheck" name="TestAppliesDiscount" time="0.000000"></testcase>
+		<testcase classname="flakycheck" name="TestUploadPaths/small_file" time="0.000000"></testcase>
+	</testsuite>
+</testsuites>

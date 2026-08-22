@@ -281,9 +281,17 @@ def _message_of(node: ET.Element) -> str | None:
 
     The `message` attribute is preferred, but only when it says something. Some
     runners fill it with a constant.
+
+    A multi-line attribute is reduced the same way element text is. `gotestsum`
+    writes the whole banner-wrapped block into `message` on a skip, so trusting the
+    attribute verbatim there put three lines of `=== RUN` / `--- SKIP:` scaffolding
+    where a one-line reason belongs. Reducing both the attribute and the text through
+    the same function is also the only way they cannot disagree.
     """
     message = (node.get("message") or "").strip()
     if message and message.lower() not in _UNINFORMATIVE_MESSAGES:
+        if "\n" in message:
+            return (salient_line(message) or message)[:1000]
         return message
 
     text = (node.text or "").strip()

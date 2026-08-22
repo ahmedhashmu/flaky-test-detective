@@ -63,6 +63,24 @@ _SUBSTITUTIONS: tuple[tuple[re.Pattern[str], str], ...] = (
         ),
         r"\1:<N>",
     ),
+    # A source location at the very start of the message is the location of the
+    # assertion, not part of the cause, and Go puts one there on every single failure
+    # ("basket_test.go:25: connection refused"). Retaining it meant two Go tests in
+    # different files failing on the same cause could never share a cluster, which is
+    # the one thing signature clustering exists to do. Runs after the rule above, so
+    # the line number is already <N>.
+    #
+    # Anchored, and only at the start. A location appearing mid-message is usually a
+    # traceback frame that distinguishes genuinely different failures, and the
+    # filename is still on the outcome's `message` and `detail` for a reader.
+    (
+        re.compile(
+            r"^(?:<PATH>/|<TMP>/)?[\w.\-+@]+"
+            r"\.(?:py|pyi|js|jsx|ts|tsx|mjs|cjs|go|java|kt|kts|rb|rs|cs|php|c|cc|cpp"
+            r"|h|hpp|swift|scala|sh|pl|lua|dart|ex|exs|vue|svelte):<N>:\s*"
+        ),
+        "",
+    ),
     (
         re.compile(r"(localhost|<IP>|[a-zA-Z0-9][a-zA-Z0-9.\-]*\.[a-zA-Z]{2,}):\d{1,5}\b"),
         r"\1:<PORT>",
@@ -100,6 +118,27 @@ _NOISE_IN_PARAM = re.compile(
     r"|\d{4}-\d{2}-\d{2}[T ]?\d{0,2}:?\d{0,2}:?\d{0,2}"
     r"|\b\d{6,}\b)"
 )
+
+_GO_BANNER = re.compile(
+    r"^(?:===\s+(?:RUN|PAUSE|CONT|NAME)\b|---\s+(?:FAIL|PASS|SKIP|BENCH)\b|(?:FAIL|ok|PASS)\s*$)"
+)
+"""Structural lines in `go test` output that describe the run, not the failure.
+
+These are why capturing real `gotestsum` output mattered. Go's failure text looks like:
+
+    === RUN   TestExpectsCleanRegistry
+        basket_test.go:25: registry already contains 'session'
+    --- FAIL: TestExpectsCleanRegistry (0.00s)
+
+The informative line is in the middle. Taking the last line -- which this module did,
+on the stated belief that Go puts the error there -- picked the `--- FAIL:` banner,
+which carries the *test's own name*. Every Go failure therefore got a unique
+signature, so signature clustering could never group two Go tests, and
+`classify.py` saw no cause text and returned `unknown` every time.
+
+The hand-written reference fixture did not catch it, because whoever wrote it put a
+sensible string in the `message` attribute rather than reproducing Go's banners.
+"""
 
 _EXCEPTION_LINE = re.compile(
     r"^\s*(?:E\s+)?[\w.$]*(?:Error|Exception|Failure|Timeout|Panic|Fault|Violation)\b\s*:.*$",
@@ -176,9 +215,14 @@ def normalize_test_id(test_id: str) -> str:
 def salient_line(detail: str | None) -> str:
     """Pick the line of a traceback most likely to identify the cause.
 
-    Prefers a line naming an exception type. Otherwise takes the last non-empty
-    line, which is where the actual error sits in a Python traceback and in most
-    Go test output.
+    Prefers a line naming an exception type. Otherwise takes the last non-empty line
+    that is not a runner banner, which is where the error sits in a bare Python
+    traceback and in `go test` output.
+
+    The banner filter is not a nicety. Go wraps every failure in `=== RUN` and
+    `--- FAIL:` lines, so "last non-empty line" returned the banner -- carrying the
+    test's own name into the signature and making Go failures impossible to cluster.
+    Measured against real `gotestsum` output; see `_GO_BANNER`.
     """
     if not detail:
         return ""
@@ -189,8 +233,14 @@ def salient_line(detail: str | None) -> str:
         # exception reported by a runner that does not use one.
         return re.sub(r"^E\s+", "", match.group(0).strip())
 
-    # No exception line. Fall back to the last non-empty line, which is where the
-    # error sits in Go test output and in a bare Python traceback. The first line
-    # would be a header ("WARNING: DATA RACE") rather than the cause.
+    # The first line would be a header ("WARNING: DATA RACE") rather than the cause,
+    # so the search runs from the end.
     lines = [line.strip() for line in detail.splitlines() if line.strip()]
+    for line in reversed(lines):
+        if not _GO_BANNER.match(line):
+            return line
+
+    # Every line was a banner. Go does this for a parent test whose only failure is
+    # that a subtest failed: there is genuinely no message. Returning the banner is
+    # the honest answer, and better than an empty signature.
     return lines[-1] if lines else ""

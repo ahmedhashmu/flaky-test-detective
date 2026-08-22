@@ -66,8 +66,24 @@ class TestSubstitutionOrdering:
         assert normalize_message("ECONNREFUSED 127.0.0.1:8080") == "ECONNREFUSED <IP>:<PORT>"
 
     def test_source_location_is_not_a_port(self) -> None:
-        """`store_test.go:41` is a line number, not a hostname with a port."""
-        assert normalize_message("store_test.go:41: bad") == "store_test.go:<N>: bad"
+        """`store_test.go:41` is a line number, not a hostname with a port.
+
+        Checked mid-message, because a leading location is now stripped entirely (see
+        below) and would hide whether this rule still works.
+        """
+        assert normalize_message("bad at store_test.go:41 here") == "bad at store_test.go:<N> here"
+
+    def test_a_leading_source_location_is_dropped(self) -> None:
+        """Go prefixes every failure with one, and it is the assertion's address,
+        not the cause. Keeping it stopped two Go tests in different files from ever
+        clustering on a shared cause."""
+        assert normalize_message("store_test.go:41: connection refused") == "connection refused"
+        assert normalize_message("basket_test.go:7: connection refused") == "connection refused"
+
+    def test_a_mid_message_location_is_kept(self) -> None:
+        """There it usually distinguishes genuinely different failures."""
+        result = normalize_message("assertion failed, see helper.py:12 for the fixture")
+        assert "helper.py:<N>" in result
 
     def test_real_host_port_is_still_a_port(self) -> None:
         """The fix above must not stop `example.com:8080` being read as a port."""
