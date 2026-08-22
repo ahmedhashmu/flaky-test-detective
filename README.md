@@ -740,11 +740,27 @@ uv sync
 Substitute `pip install -e ".[dev]"` for `uv sync` and drop the `uv run` prefixes to use
 pip instead.
 
-**1. Test suite** — 897 tests, about 17 seconds:
+**1. Test suite** — 937 tests, about 30 seconds:
 
 ```sh
 uv run pytest
 ```
+
+40 of those are property-based, not example-based: Hypothesis generates histories and
+checks *relationships* rather than one hand-picked outcome. A test that never passed is
+never labelled flaky, merging two databases is commutative and idempotent, ingesting runs
+in reverse cannot change a verdict, and the JSON report cannot disagree with the analysis
+it renders. Run them alone with:
+
+```sh
+uv run pytest tests/test_properties.py
+```
+
+One of them checks the *generator*, and fails if the generated histories stop reaching
+flaky, broken, regression and never-passed states — because a property that never sees the
+interesting case passes while proving nothing. Reasoning, and the two things this exercise
+corrected about what the code was believed to guarantee, in
+**[ADR-0016](docs/adr/0016-assert-relationships-not-only-examples.md)**.
 
 **2. See it working immediately**, with no suite of your own and no waiting:
 
@@ -982,6 +998,7 @@ access at any point.
 - [Vite](https://vite.dev/) and [TypeScript](https://www.typescriptlang.org/) — frontend build
 - [pytest](https://pytest.org/), [ruff](https://docs.astral.sh/ruff/),
   [mypy](https://mypy-lang.org/), [uv](https://docs.astral.sh/uv/) — development
+- [Hypothesis](https://hypothesis.readthedocs.io/) — property-based tests (dev only)
 - [pytest-randomly](https://github.com/pytest-dev/pytest-randomly) — order randomization
   for the demo (dev only)
 

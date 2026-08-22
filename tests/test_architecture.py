@@ -441,7 +441,7 @@ class TestPackagingMetadata:
         extras = self.pyproject()["project"]["optional-dependencies"]
         assert "dev" in extras
         names = " ".join(extras["dev"])
-        for tool in ("pytest", "ruff", "mypy", "pytest-randomly"):
+        for tool in ("pytest", "ruff", "mypy", "pytest-randomly", "hypothesis"):
             assert tool in names, f"{tool} missing from the dev extra"
 
     def test_dev_group_references_the_extra_rather_than_duplicating_it(self) -> None:

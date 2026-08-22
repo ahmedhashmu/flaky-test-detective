@@ -46,6 +46,10 @@ dev = [
     # Provides --randomly-seed, which `flaky hunt --shuffle` probes for. Without
     # it, order-dependent flakes in the demo suite cannot be provoked.
     "pytest-randomly>=3.15.0",
+    # Property-based tests in tests/test_properties.py. Development only: it
+    # generates the histories that the invariants are checked against, and nothing
+    # in the shipped package imports it. The two runtime dependencies stay at two.
+    "hypothesis>=6.100.0",
 ]
 
 [dependency-groups]
@@ -62,7 +66,10 @@ packages = ["src/flaky_detective"]
 testpaths = ["tests"]
 # examples/ holds a deliberately flaky suite used as a fixture for this tool.
 # It must never run as part of this project's own test suite.
-norecursedirs = ["examples", ".git", ".venv", "build", "dist"]
+# `.hypothesis` is listed because setting this option replaces pytest's defaults
+# rather than extending them, and Hypothesis warns when its example database ends
+# up inside the collected tree.
+norecursedirs = ["examples", ".git", ".venv", "build", "dist", ".hypothesis"]
 addopts = "-q --strict-markers"
 markers = [
     "integration: exercises the full pipeline, slower than a unit test",

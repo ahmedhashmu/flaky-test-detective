@@ -79,6 +79,22 @@ parse proves nothing about Maven's actual output.
 Test the analysis functions directly with constructed data. They are pure by
 design specifically so they can be tested without a database or a filesystem.
 
+Example tests pin decisions; property tests pin relationships. Both are required
+and neither replaces the other. When adding a property in
+`tests/test_properties.py`:
+
+- State it so it is **true**, not so it passes. `analyze_test` requires
+  chronological order, so "shuffling the outcomes changes nothing" is not an
+  invariant of this codebase and asserting it would only force a sort that hides
+  the real requirement.
+- If a property needs a precondition, put it in the generator and say why in the
+  generator's docstring. A precondition discovered later is a bug found; a
+  precondition added quietly to make a test green is a bug hidden.
+- Assert the generator's own reach. A property that never reaches the interesting
+  state passes while proving nothing, which is the specific way this kind of test
+  rots. `TestTheGeneratorIsNotVacuous` fails if flaky, broken, regression or
+  never-passed histories stop being produced.
+
 ## Style
 
 - `ruff` defaults, 100-char lines
