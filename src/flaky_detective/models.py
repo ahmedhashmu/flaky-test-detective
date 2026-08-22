@@ -299,6 +299,190 @@ class TriageReport:
         return self.total_failures > 0 and not self.actionable
 
 
+class Change(StrEnum):
+    """What a branch did to one test, relative to the baseline it branched from.
+
+    The distinction that matters is between flakiness a change *introduced* and
+    flakiness it merely *inherited*. Blocking a merge for a flake that was already
+    there punishes whoever touched the file last, which is how a gate stops being
+    trusted; letting a newly introduced flake through is how a suite rots.
+    """
+
+    NEW_FLAKE = "new_flake"
+    """Stable on the baseline, flaky here, by more than sampling noise explains."""
+
+    NEW_BREAK = "new_break"
+    """Passing on the baseline, consistently failing here. Not flakiness: breakage."""
+
+    WORSE = "worse"
+    """Flaky on both sides, measurably more so here."""
+
+    KNOWN_FLAKE = "known_flake"
+    """Flaky on both sides, not measurably worse. Pre-existing, so not this change's debt."""
+
+    IMPROVED = "improved"
+    """Flaky on the baseline, clean here. A candidate fix."""
+
+    UNCHANGED = "unchanged"
+    """Nothing worth reporting."""
+
+    UNPROVEN = "unproven"
+    """Something moved, and the evidence does not support naming it.
+
+    Its own category rather than being folded into `unchanged`, because "we cannot
+    tell" and "nothing happened" are different answers and a gate that conflates them
+    is quietly guessing.
+    """
+
+
+@dataclass(frozen=True, slots=True)
+class TestComparison:
+    """One test, judged across two histories."""
+
+    test_id: str
+    name: str
+    change: Change
+
+    baseline: TestAnalysis | None
+    head: TestAnalysis
+
+    baseline_rate_bound: float = 0.0
+    """Upper confidence bound on the baseline failure rate.
+
+    The baseline gets the benefit of the doubt on purpose. Comparing against its
+    observed rate would call a change guilty whenever the baseline happened to look
+    cleaner than it is; comparing against the highest rate its runs are consistent
+    with means a flake has to clear a bar the baseline's own uncertainty already sets.
+    """
+
+    probability: float = 1.0
+    """Chance of this many failures here if the baseline rate were the bound above.
+
+    Low means the change is the more likely explanation. This is the number the
+    verdict rests on, so it is carried rather than discarded after the decision.
+    """
+
+    explanation: str = ""
+
+    @property
+    def blocks(self) -> bool:
+        """Should this stop a merge?
+
+        Only for flakiness or breakage the change introduced. `WORSE` is reported
+        loudly and deliberately does not block: a pre-existing flake getting worse is
+        often a coincidence of sampling, and blocking on it would make the gate
+        unpredictable, which costs more than it saves.
+        """
+        return self.change in (Change.NEW_FLAKE, Change.NEW_BREAK)
+
+    @property
+    def confidence(self) -> str:
+        """A word for how much to believe this, derived from the two things that matter.
+
+        Proof means same-commit divergence or a runner-recorded retry in the new runs:
+        the test both passed and failed with identical code. Without that, a low
+        probability alone is a statistical argument rather than a demonstration, and it
+        is reported as the weaker thing it is.
+        """
+        if self.change in (Change.UNCHANGED, Change.UNPROVEN):
+            return "none"
+        proven = self.head.divergent_commits > 0 or self.head.retries > 0
+        if proven and self.probability <= STRONG_PROBABILITY:
+            return "high"
+        if proven or self.probability <= STRONG_PROBABILITY:
+            return "moderate"
+        return "weak"
+
+    @property
+    def baseline_summary(self) -> str:
+        if self.baseline is None:
+            return "not on the baseline"
+        return f"{self.baseline.failures}/{self.baseline.runs} failed"
+
+    @property
+    def head_summary(self) -> str:
+        return f"{self.head.failures}/{self.head.runs} failed"
+
+
+STRONG_PROBABILITY = 0.01
+"""Probability below which the statistical side of a comparison counts as strong.
+
+Ten times stricter than the 0.05 gate that decides whether a change is reported at
+all. The gate answers "is this worth saying"; this answers "how firmly", and those
+should not be the same number or every reported change would look equally certain.
+"""
+
+
+@dataclass(frozen=True, slots=True)
+class ComparisonReport:
+    """Whether a branch introduced flakiness, relative to where it branched from."""
+
+    entries: tuple[TestComparison, ...]
+
+    baseline_runs: int = 0
+    head_runs: int = 0
+    baseline_label: str | None = None
+    head_label: str | None = None
+    baseline_tests: int = 0
+    head_tests: int = 0
+
+    @property
+    def new_flakes(self) -> tuple[TestComparison, ...]:
+        return tuple(e for e in self.entries if e.change is Change.NEW_FLAKE)
+
+    @property
+    def new_breaks(self) -> tuple[TestComparison, ...]:
+        return tuple(e for e in self.entries if e.change is Change.NEW_BREAK)
+
+    @property
+    def worse(self) -> tuple[TestComparison, ...]:
+        return tuple(e for e in self.entries if e.change is Change.WORSE)
+
+    @property
+    def known_flakes(self) -> tuple[TestComparison, ...]:
+        return tuple(e for e in self.entries if e.change is Change.KNOWN_FLAKE)
+
+    @property
+    def improved(self) -> tuple[TestComparison, ...]:
+        return tuple(e for e in self.entries if e.change is Change.IMPROVED)
+
+    @property
+    def unproven(self) -> tuple[TestComparison, ...]:
+        return tuple(e for e in self.entries if e.change is Change.UNPROVEN)
+
+    @property
+    def blocking(self) -> tuple[TestComparison, ...]:
+        return tuple(e for e in self.entries if e.blocks)
+
+    @property
+    def introduced_flakiness(self) -> bool:
+        return bool(self.new_flakes)
+
+    @property
+    def clean(self) -> bool:
+        return not self.blocking
+
+    @property
+    def enough_baseline(self) -> bool:
+        """Was there enough baseline history for the comparison to mean anything?
+
+        Reported rather than assumed. Comparing a PR against three runs of `main` and
+        announcing that it introduced a flake is a guess wearing a verdict's clothes.
+        """
+        return self.baseline_runs >= MIN_BASELINE_RUNS
+
+
+MIN_BASELINE_RUNS = 8
+"""Baseline runs needed before "this was stable before" is a claim rather than a hope.
+
+Chosen to match the shape of the accuracy sweep rather than by taste: measured over
+generated populations, the false-alarm rate at five runs of history is 12.5% and only
+reaches zero around ten. Eight is the point where the upper confidence bound on a
+clean baseline drops below roughly a third, which is tight enough for a real
+regression to clear it and loose enough not to fire on noise.
+"""
+
+
 class Attribution(StrEnum):
     """How much the recorded history can say about when flakiness started."""
 

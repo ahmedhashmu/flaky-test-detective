@@ -113,6 +113,11 @@ precision, 0 false alarms.** Most tools in this space ask you to take accuracy o
 runs after `test_registers_session`, 100% of the time — reset that shared state in
 teardown".
 
+**It knows whose fault it is.** `flaky compare` distinguishes flakiness a branch
+*introduced* from flakiness it inherited, so a pull request is blocked for what it broke
+and cleared for what was already broken. Blocking people for pre-existing flakes is how
+CI gates get switched off.
+
 **It works for any language.** The tool reads JUnit XML and never reads your source, so
 pytest, jest, go, JUnit, Gradle and .NET all work without it knowing anything about them.
 
@@ -319,6 +324,7 @@ the evidence of itself to argue it is flaky.
 | `flaky hunt -- <cmd>` | Run a test command N times, recording every outcome |
 | `flaky analyze` | Ranked flakes with diagnosis |
 | `flaky triage <report>` | Known flakes vs new breakage for one run |
+| `flaky compare` | Did *this branch* introduce flakiness, or inherit it |
 | `flaky blame <test-id>` | Which commit introduced the flakiness |
 | `flaky merge <sources…>` | Pool history from other machines or CI shards |
 | `flaky benchmark` | Measure this tool's own accuracy against generated ground truth |
@@ -425,6 +431,59 @@ PR comment that updates in place rather than adding one per push.
 | `1` | Flaky tests found, nothing needing a human |
 | `2` | Regression or broken test found |
 | `3` | Usage or input error |
+
+### Gate on what the branch introduced
+
+Add `compare-against` and the gate stops asking "what is red" and starts asking "**did
+this branch cause it**":
+
+```yaml
+- uses: ahmedhashmu/flaky-test-detective@main
+  with:
+    report-path: reports/junit.xml
+    compare-against: main
+```
+
+```
+                          pull request
+                               │
+                               ▼
+                    Flaky Test Detective
+              ┌────────────────┼────────────────┐
+              ▼                ▼                ▼
+        pre-existing      newly flaky       newly broken
+           flake         (this branch)     (this branch)
+              │                │                │
+              ▼                ▼                ▼
+            ALLOW            BLOCK            BLOCK
+```
+
+Both halves matter. It blocks a merge that added a flake, and it **clears** a merge whose
+only red tests were already red — which is the half that stops teams switching the gate
+off.
+
+A branch has to beat the baseline's own uncertainty before it gets blamed. Zero failures
+in 40 runs of `main` is consistent with a true failure rate near 7%, so that is the bar,
+not zero. Otherwise the gate eventually tells someone their one-line change broke a test
+they never touched, and a gate that fires on luck gets deleted.
+
+Verified rather than asserted, holding the branch's runs identical and growing only the
+baseline:
+
+| Baseline runs | Bound on the old rate | Branch shows 5/20 | Verdict |
+|---|---:|---:|---|
+| 20 | 13.9% | p = 0.135 | `unproven` — cannot attribute |
+| 60 | 4.9% | p = 0.002 | `new flake`, high confidence |
+
+Locally, either way round:
+
+```sh
+flaky compare --baseline main.db --head pr.db
+flaky compare --db .flaky.db --base-branch main --head-branch my-feature
+```
+
+Design, and why rate comparison is the wrong statistic:
+**[ADR-0012](docs/adr/0012-attribute-flakiness-to-a-branch.md)**.
 
 Sharded builds, GitLab, and generic CI recipes: **[docs/ci-integration.md](docs/ci-integration.md)**.
 
@@ -576,7 +635,7 @@ uv sync
 Substitute `pip install -e ".[dev]"` for `uv sync` and drop the `uv run` prefixes to use
 pip instead.
 
-**1. Test suite** — 685 tests, about 16 seconds:
+**1. Test suite** — 731 tests, about 16 seconds:
 
 ```sh
 uv run pytest
@@ -649,7 +708,34 @@ uv run flaky issue test_expects_clean_registry --db /tmp/demo.db -f slack
 
 It prints; it never posts. There is no credential to supply and nothing leaves the machine.
 
-**6. Triage**, the CI gate:
+**6. Prove it can tell whose fault flakiness is.** The demo suite ships a deterministic
+mode, so the same tests can be recorded stable and then genuinely flaky — exactly the
+before/after a pull request creates:
+
+```sh
+FLAKY_DEMO_DETERMINISTIC=1 uv run flaky hunt -n 20 --db /tmp/base.db -- \
+  uv run pytest examples/flaky_demo -p no:cacheprovider -q
+
+uv run flaky hunt -n 20 --db /tmp/pr.db -- \
+  uv run pytest examples/flaky_demo -p no:cacheprovider -q
+
+uv run flaky compare --baseline /tmp/base.db --head /tmp/pr.db ; echo "exit: $?"
+```
+
+Expect roughly 8–10 tests reported as **newly flaky** with high confidence, each naming
+same-commit divergence as the evidence, and exit 1.
+
+Then three things worth checking, because they are where this is easy to get wrong:
+
+- `test_known_broken` fails every run on **both** sides. It must be reported `unchanged`,
+  never as a new break — it was already broken.
+- Reverse the arguments (`--baseline /tmp/pr.db --head /tmp/base.db`). It must report **0
+  introduced** and around 10 `improved`. A comparison that is not antisymmetric is not
+  measuring what changed.
+- Some tests land in "not enough evidence to attribute". That is the intended answer at 20
+  runs a side, not a bug. Re-record the baseline with `-n 60` and watch them move.
+
+**7. Triage**, the CI gate:
 
 ```sh
 uv run pytest examples/flaky_demo -q --junitxml=/tmp/run.xml ; true
@@ -659,7 +745,7 @@ uv run flaky triage /tmp/run.xml --db /tmp/demo.db ; echo "exit: $?"
 Several tests failed; it should report only `test_known_broken` as needing attention, and
 exit 2.
 
-**7. Merge history from two machines:**
+**8. Merge history from two machines:**
 
 ```sh
 uv run flaky hunt -n 6 --db /tmp/a.db -- uv run pytest examples/flaky_demo -q
@@ -668,7 +754,7 @@ uv run flaky merge /tmp/b.db --into /tmp/a.db     # 12 runs
 uv run flaky merge /tmp/b.db --into /tmp/a.db     # no-op, idempotent
 ```
 
-**8. Verify the quarantine export really works:**
+**9. Verify the quarantine export really works:**
 
 ```sh
 uv run flaky quarantine recommend --db /tmp/demo.db --apply
@@ -679,7 +765,7 @@ PYTHONPATH=/tmp/qp uv run pytest examples/flaky_demo -p qplugin -q -rs
 Quarantined tests are reported as skipped with a reason. `test_known_broken` still fails,
 because quarantine never hides a real failure.
 
-**9. Confirm this project's own suite is not flaky** — a reasonable thing to demand of this
+**10. Confirm this project's own suite is not flaky** — a reasonable thing to demand of this
 particular tool:
 
 ```sh

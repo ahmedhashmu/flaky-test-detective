@@ -22,22 +22,26 @@ flaky-test-detective/
 │   │   ├── clustering.py  signature clustering
 │   │   ├── ordering.py    order-dependence detection
 │   │   ├── attribution.py blame: when flakiness started
+│   │   ├── comparison.py  what one branch introduced over another
 │   │   ├── health.py      trust score, wasted-CI-time estimate
 │   │   └── classify.py    root-cause heuristics
 │   ├── benchmark/         accuracy against ground truth
 │   │   ├── __init__.py    run_benchmark(), sweep()
 │   │   ├── generate.py    labelled population generation
+│   │   ├── realworld.py   scoring against published labels from real repos
 │   │   └── score.py       precision, recall, confusion matrix
 │   ├── runner.py          hunt: repeated execution
 │   ├── quarantine.py      quarantine list and exporters
 │   ├── report/
-│   │   ├── __init__.py
+│   │   ├── __init__.py    render() and render_triage() format dispatch
 │   │   ├── console.py
 │   │   ├── markdown.py
 │   │   ├── json_report.py
 │   │   ├── html.py
 │   │   ├── issue.py       issue bodies and chat messages
-│   │   └── triage.py
+│   │   ├── comparison.py  what a branch introduced
+│   │   ├── validation.py  real-world accuracy against published labels
+│   │   └── benchmark_report.py
 │   ├── web/               the dashboard
 │   │   ├── __init__.py    http.server routing, static assets, caching
 │   │   ├── api.py         JSON payloads, serialization only
@@ -47,6 +51,7 @@ flaky-test-detective/
 │   ├── fixtures/          real JUnit XML from each runner
 │   └── test_*.py
 ├── examples/flaky_demo/   deliberately flaky suite, the tool's own fixture
+├── validation/            real-world evaluation harness and its committed results
 ├── web/                   React 18 + MUI 6 source; builds into web/static above
 ├── docs/                  architecture, scoring, accuracy, dashboard, ADRs
 ├── .github/workflows/

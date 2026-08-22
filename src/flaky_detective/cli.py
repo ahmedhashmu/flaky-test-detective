@@ -28,6 +28,7 @@ from . import __version__, runner, web
 from . import report as report_module
 from .analysis import analyze as analyze_outcomes
 from .analysis import analyze_one
+from .analysis import compare as compare_histories
 from .analysis import triage as triage_run
 from .analysis.attribution import blame as blame_test
 from .benchmark import realworld, run_benchmark
@@ -39,6 +40,7 @@ from .models import AnalysisReport, TestOutcome, Verdict
 from .quarantine import EXPORT_FORMATS, Quarantine, recommend, verify
 from .quarantine import export as export_quarantine
 from .report import benchmark_report
+from .report import comparison as comparison_report
 from .report import console as console_report
 from .report import issue as issue_report
 from .report import validation as validation_report
@@ -438,6 +440,150 @@ def triage(
     if result.new_failures:
         raise typer.Exit(EXIT_REGRESSION if fail_on == "regression" else EXIT_FLAKY)
     raise typer.Exit(EXIT_OK)
+
+
+@app.command()
+def compare(
+    baseline_db: Annotated[
+        Path | None,
+        typer.Option("--baseline", help="History for the branch you branched from."),
+    ] = None,
+    head_db: Annotated[
+        Path | None,
+        typer.Option("--head", help="History for this change. Defaults to --db."),
+    ] = None,
+    base_branch: Annotated[
+        str | None,
+        typer.Option("--base-branch", help="Use one database, taking the baseline from here."),
+    ] = None,
+    head_branch: Annotated[
+        str | None,
+        typer.Option("--head-branch", help="Use one database, taking this change from here."),
+    ] = None,
+    fmt: Annotated[str, typer.Option("--format", "-f", help="console, md, or json.")] = "console",
+    output: Annotated[
+        Path | None, typer.Option("--output", "-o", help="Write here instead of stdout.")
+    ] = None,
+    fail_on: Annotated[
+        str,
+        typer.Option("--fail-on", help="Exit non-zero on: none, introduced, or any."),
+    ] = "introduced",
+    db: DbOption = None,
+    config: ConfigOption = None,
+    threshold: ThresholdOption = None,
+) -> None:
+    """Ask whether this change introduced flakiness, or merely inherited it.
+
+    `triage` judges one run. This judges a *branch*, which is the question a pull
+    request actually raises: a test being flaky is not the author's problem, a test
+    becoming flaky is.
+
+    Two ways to say what to compare:
+
+        flaky compare --baseline main.db --head pr.db
+        flaky compare --db .flaky.db --base-branch main --head-branch my-feature
+
+    A flake has to beat the baseline's own uncertainty before it is attributed here.
+    Zero failures in 40 baseline runs is consistent with a true failure rate near 7%, so
+    that is the bar, not zero -- otherwise the gate fires on luck, and a gate that fires
+    on luck gets ignored.
+    """
+    settings = _settings(config, db, threshold)
+
+    if fail_on not in ("none", "introduced", "any"):
+        stderr.print(f"--fail-on must be none, introduced, or any, not {fail_on!r}")
+        raise typer.Exit(EXIT_USAGE)
+
+    using_branches = bool(base_branch or head_branch)
+    using_databases = bool(baseline_db or head_db)
+
+    if using_branches and using_databases:
+        stderr.print(
+            "Choose one comparison source: either --baseline/--head databases, or "
+            "--base-branch/--head-branch within a single database."
+        )
+        raise typer.Exit(EXIT_USAGE)
+
+    if using_branches:
+        if not (base_branch and head_branch):
+            stderr.print("--base-branch and --head-branch must be given together.")
+            raise typer.Exit(EXIT_USAGE)
+        baseline_outcomes, head_outcomes = _branch_windows(settings, base_branch, head_branch)
+        labels = (base_branch, head_branch)
+    else:
+        if not baseline_db:
+            stderr.print(
+                "Nothing to compare against. Give --baseline <db>, or use\n"
+                "  --base-branch main --head-branch <yours>  to split one database."
+            )
+            raise typer.Exit(EXIT_USAGE)
+        head_path = head_db or settings.db_path
+        baseline_outcomes = _outcomes_from(baseline_db)
+        head_outcomes = _outcomes_from(head_path)
+        labels = (baseline_db.name, head_path.name)
+
+    baseline = analyze_outcomes(baseline_outcomes, settings)
+    head = analyze_outcomes(head_outcomes, settings)
+    result = compare_histories(baseline, head, baseline_label=labels[0], head_label=labels[1])
+
+    if fmt == "console":
+        comparison_report.render_console(result, stdout)
+    else:
+        try:
+            _emit(comparison_report.render(result, fmt), output)
+        except ValueError as exc:
+            stderr.print(str(exc))
+            raise typer.Exit(EXIT_USAGE) from exc
+
+    if fail_on == "none":
+        raise typer.Exit(EXIT_OK)
+    if result.new_breaks:
+        raise typer.Exit(EXIT_REGRESSION)
+    if result.new_flakes:
+        raise typer.Exit(EXIT_FLAKY)
+    if fail_on == "any" and (result.worse or result.known_flakes):
+        raise typer.Exit(EXIT_FLAKY)
+    raise typer.Exit(EXIT_OK)
+
+
+def _outcomes_from(path: Path) -> list[TestOutcome]:
+    """Read every outcome from one database, or exit saying which one was missing."""
+    if not path.is_file():
+        stderr.print(f"No database at {path}.")
+        raise typer.Exit(EXIT_USAGE)
+    try:
+        with Storage(path) as store:
+            return store.outcomes()
+    except StorageError as exc:
+        stderr.print(f"Could not read {path}: {exc}")
+        raise typer.Exit(EXIT_USAGE) from exc
+
+
+def _branch_windows(
+    settings: Config, base_branch: str, head_branch: str
+) -> tuple[list[TestOutcome], list[TestOutcome]]:
+    """Split a single database into two windows by branch.
+
+    The common CI shape: one cached database accumulating `main` while pull-request runs
+    land alongside it. Both queries exclude the other branch outright rather than
+    slicing by date, so a long-running branch cannot leak its own runs into the baseline
+    it is being judged against.
+    """
+    with _storage(settings) as store:
+        baseline = store.outcomes(branch=base_branch)
+        head = store.outcomes(branch=head_branch)
+
+    if not baseline:
+        stderr.print(
+            f"No runs recorded on branch {base_branch!r} in {settings.db_path}.\n"
+            "Record the base branch first, or compare two databases with --baseline."
+        )
+        raise typer.Exit(EXIT_USAGE)
+    if not head:
+        stderr.print(f"No runs recorded on branch {head_branch!r} in {settings.db_path}.")
+        raise typer.Exit(EXIT_USAGE)
+
+    return baseline, head
 
 
 @app.command()

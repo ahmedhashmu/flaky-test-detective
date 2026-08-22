@@ -70,6 +70,22 @@ inputs:
     required: false
     default: "true"
 
+  compare-against:
+    description: >-
+      Base branch to compare this branch against, for example "main". When set on a
+      pull request, the action also reports whether this branch *introduced* flakiness
+      rather than merely inheriting it, and fails only on what it introduced.
+
+      Needs history on both sides: run the action with ingest-only on the base branch
+      to accumulate a baseline, and expect the first pull-request runs to report
+      "cannot attribute" until enough runs exist on the branch. That is the honest
+      answer, not a limitation to work around -- one CI run cannot establish that a
+      test is flaky.
+
+      Leave empty to disable.
+    required: false
+    default: ""
+
 outputs:
   exit-code:
     description: "0 clean, 1 flaky found, 2 regression or broken found, 3 usage error."
@@ -86,6 +102,17 @@ outputs:
   summary:
     description: "One-line human-readable verdict."
     value: ${{ steps.triage.outputs.summary }}
+  new-flakes:
+    description: >-
+      Number of tests this branch made flaky, when compare-against is set. Empty
+      otherwise. Distinct from known-flakes, which counts pre-existing ones.
+    value: ${{ steps.compare.outputs.new-flakes }}
+  new-breaks:
+    description: "Number of tests this branch broke outright, when compare-against is set."
+    value: ${{ steps.compare.outputs.new-breaks }}
+  introduced:
+    description: "true when this branch introduced flakiness or breakage."
+    value: ${{ steps.compare.outputs.introduced }}
 
 runs:
   using: "composite"
@@ -167,6 +194,68 @@ runs:
         fi
         echo "exit-code=$code" >> "$GITHUB_OUTPUT"
 
+    # Triage answers "is this run's redness new?". This answers the different question a
+    # pull request actually raises: "did *my* branch cause it?". A test being flaky is
+    # not the author's problem; a test becoming flaky is.
+    - name: Did this branch introduce flakiness
+      id: compare
+      if: inputs.compare-against != '' && inputs.ingest-only != 'true' && github.event_name == 'pull_request'
+      shell: bash
+      run: |
+        head_branch="${{ github.event.pull_request.head.ref }}"
+        base_branch="${{ inputs.compare-against }}"
+
+        set +e
+        flaky compare \
+          --db "${{ inputs.db }}" \
+          --base-branch "$base_branch" \
+          --head-branch "$head_branch" \
+          --format json \
+          --fail-on none > /tmp/flaky-compare.json
+        status=$?
+        set -e
+
+        # A missing baseline is the expected state on first adoption, not an error: the
+        # base branch has not accumulated history yet. Say so and carry on, rather than
+        # failing a pull request over the tool's own setup.
+        if [ "$status" -ne 0 ] || [ ! -s /tmp/flaky-compare.json ]; then
+          echo "::notice::No comparable history for '$base_branch' vs '$head_branch' yet." \
+               "Run this action with ingest-only on $base_branch to build a baseline."
+          echo "new-flakes=" >> "$GITHUB_OUTPUT"
+          echo "new-breaks=" >> "$GITHUB_OUTPUT"
+          echo "introduced=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        read_summary() {
+          python -c "import json;print(json.load(open('/tmp/flaky-compare.json'))['summary']['$1'])"
+        }
+        new_flakes=$(read_summary new_flakes)
+        new_breaks=$(read_summary new_breaks)
+        known=$(read_summary known_flakes)
+        enough=$(read_summary enough_baseline)
+
+        echo "new-flakes=$new_flakes" >> "$GITHUB_OUTPUT"
+        echo "new-breaks=$new_breaks" >> "$GITHUB_OUTPUT"
+
+        introduced=false
+        if [ "$new_flakes" -gt 0 ] || [ "$new_breaks" -gt 0 ]; then
+          introduced=true
+        fi
+        echo "introduced=$introduced" >> "$GITHUB_OUTPUT"
+
+        if [ "$enough" != "True" ]; then
+          echo "::warning::The '$base_branch' baseline is too thin to attribute flakiness" \
+               "confidently. Treat the comparison below as provisional."
+        fi
+
+        echo "new flakes: $new_flakes, new breaks: $new_breaks, pre-existing flakes: $known"
+
+        mkdir -p flaky-reports
+        flaky compare --db "${{ inputs.db }}" \
+          --base-branch "$base_branch" --head-branch "$head_branch" \
+          --format md --fail-on none > flaky-reports/comparison.md || true
+
     - name: Render reports
       if: inputs.ingest-only != 'true'
       shell: bash
@@ -178,6 +267,11 @@ runs:
           --output flaky-reports/report.html || true
         flaky report --db "${{ inputs.db }}" --format json \
           --output flaky-reports/report.json || true
+
+        if [ -s flaky-reports/comparison.md ]; then
+          cat flaky-reports/comparison.md >> "$GITHUB_STEP_SUMMARY"
+          printf '\n---\n\n' >> "$GITHUB_STEP_SUMMARY"
+        fi
         cat flaky-reports/triage.md >> "$GITHUB_STEP_SUMMARY"
 
     - name: Comment on the pull request
@@ -188,7 +282,19 @@ runs:
       run: |
         marker="<!-- flaky-test-detective -->"
         body_file=/tmp/flaky-comment.md
-        { echo "$marker"; cat flaky-reports/triage.md; } > "$body_file"
+
+        # The comparison goes first when it exists: "did I break this" outranks "what is
+        # red" for someone reading their own pull request.
+        {
+          echo "$marker"
+          if [ -s flaky-reports/comparison.md ]; then
+            cat flaky-reports/comparison.md
+            echo
+            echo "---"
+            echo
+          fi
+          cat flaky-reports/triage.md
+        } > "$body_file"
 
         # Find our previous comment by the hidden marker and edit it, so the thread
         # does not fill up with one comment per push.
@@ -226,6 +332,17 @@ runs:
       run: |
         code="${{ steps.triage.outputs.exit-code }}"
         policy="${{ inputs.fail-on }}"
+
+        # When comparison ran, what this branch *introduced* is the deciding fact, and it
+        # decides in both directions. It blocks a merge that added a flake even though
+        # triage would have shrugged at it, and it clears a merge whose only red tests
+        # were already red before -- which is the case that makes teams switch a gate off.
+        if [ "${{ steps.compare.outputs.introduced }}" = "true" ] && [ "$policy" != "none" ]; then
+          flakes="${{ steps.compare.outputs.new-flakes }}"
+          breaks="${{ steps.compare.outputs.new-breaks }}"
+          echo "::error::This branch introduced ${flakes:-0} new flaky test(s) and ${breaks:-0} new break(s). See the pull-request comment for the evidence."
+          exit 2
+        fi
 
         case "$policy" in
           none)

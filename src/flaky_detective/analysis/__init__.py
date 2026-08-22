@@ -21,6 +21,7 @@ from ..models import (
 )
 from .classify import classify, remediation_for
 from .clustering import cluster_failures
+from .comparison import compare
 from .flakiness import analyze_test
 from .ordering import build_predecessor_index, detect_order_dependence
 
@@ -30,6 +31,7 @@ __all__ = [
     "build_predecessor_index",
     "classify",
     "cluster_failures",
+    "compare",
     "detect_order_dependence",
     "remediation_for",
     "triage",
