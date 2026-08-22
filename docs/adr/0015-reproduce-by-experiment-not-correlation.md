@@ -70,7 +70,8 @@ failed *every single time* — so the tool would have found deterministic order 
 and nothing else, while appearing to search for the general case. `DEFAULT_SEARCH_TRIALS`
 is now 6, the cheapest point where a merely-frequent dependence is findable.
 
-The cost of both changes together, on the same demo case: **45 suite runs to 88**. The
+The cost of both changes together, on the same demo case: **45 suite runs to roughly 85**, or
+about 25 seconds of wall clock. The
 answer is unchanged (15 candidates to 1, the true polluter) and now it is defensible.
 
 ### Measure the control first, always
@@ -173,7 +174,9 @@ $ pytest -p no:randomly \
 1 passed                    # three times out of three
 ```
 
-20/20 in that order, 0/20 alone. Eight experiments to get there from fifteen candidates.
+20/20 in that order, 0/20 alone. Seven or eight experiments to get there from fifteen
+candidates -- the reduction is stable, the experiment count moves a little because the
+recorded history being searched is itself nondeterministic.
 
 Two properties of that table matter as much as the successes. The negative answers were
 **cheap** — 11 and 15 suite runs against 45 for a positive — because the search checks all

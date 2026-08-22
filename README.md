@@ -125,9 +125,11 @@ runs, so whatever varied, it was not the code. That is evidence, not inference.
 **It makes the test fail on demand.** Detection is the easy half. A flaky test nobody can
 reproduce is still unfixable, so `flaky reproduce` runs your suite against candidate subsets
 and delta-debugs them down to a *locally minimal* sequence that still breaks the test — then prints
-the command. On the demo suite: **15 candidate predecessors reduced to 1 in 8 experiments,
-20/20 failures in that order against 0/20 alone**, for 88 suite runs. Not a correlation. A
-command you can paste.
+the command. On the demo suite: **15 candidate predecessors reduced to 1**, with **20/20
+failures in that order against 0/20 alone**. Costs 7-8 experiments and 80-90 suite runs,
+about 25 seconds. The reduction and the rates are stable; the run counts vary a little
+because the recorded history it searches is genuinely nondeterministic. Not a correlation.
+A command you can paste.
 
 **It refuses to cry wolf.** A consistently failing test is reported as `broken` or
 `regression`, never flaky, because labelling a real break "flaky" teaches you to re-run
