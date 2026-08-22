@@ -72,7 +72,13 @@ class TestLoading:
         assert settings.db_path == (tmp_path / "history" / "runs.db").resolve()
 
     def test_absolute_paths_are_left_alone(self, tmp_path: Path) -> None:
-        (tmp_path / ".flaky.toml").write_text(f'[flaky]\ndb = "{tmp_path}/abs.db"\n')
+        # as_posix(), because a TOML basic string treats backslash as an escape: a raw
+        # Windows path like C:\Users\... makes `\U` a unicode escape and the file fails to
+        # parse. Forward slashes are valid on Windows and are what a user should write, so
+        # EXAMPLE_CONFIG says so.
+        (tmp_path / ".flaky.toml").write_text(
+            f'[flaky]\ndb = "{tmp_path.as_posix()}/abs.db"\n', encoding="utf-8"
+        )
         assert load_config(start=tmp_path).db_path == tmp_path / "abs.db"
 
     def test_accepts_a_bare_table(self, tmp_path: Path) -> None:

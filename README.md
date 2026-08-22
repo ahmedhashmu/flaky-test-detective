@@ -656,6 +656,11 @@ Stated plainly, because a tool about trustworthy signals should be honest about 
 - **go, Surefire and .NET parsers are unvalidated against live runners** — those
   toolchains were unavailable. Provenance per fixture in
   [tests/fixtures/README.md](tests/fixtures/README.md).
+- **`flaky reproduce` is pytest-only.** It needs a runner that accepts an ordered list of
+  tests and honours that order. Other runners get a usage error naming the limitation, not
+  a silent wrong answer. Reproduction has also **not** been evaluated against the twelve
+  real repositories: replaying recorded XML is not enough when the answer requires executing
+  code, so the 11% figure above remains the published real-world number.
 - **It does not fix anything.** Root causes are semantic.
 
 ## How Kiro was used
@@ -749,7 +754,7 @@ uv sync
 Substitute `pip install -e ".[dev]"` for `uv sync` and drop the `uv run` prefixes to use
 pip instead.
 
-**1. Test suite** — 937 tests, about 30 seconds:
+**1. Test suite** — 968 tests, about 30 seconds:
 
 ```sh
 uv run pytest

@@ -19,6 +19,7 @@ dashboard surfaces commands for the user to run rather than running them.
 from __future__ import annotations
 
 import json
+import os
 import threading
 from collections.abc import Callable
 from functools import partial
@@ -72,6 +73,20 @@ class _Server(ThreadingHTTPServer):
     """
 
     daemon_threads = True
+
+    allow_reuse_address = os.name != "nt"
+    """False on Windows, and that difference is not cosmetic.
+
+    `HTTPServer` sets this to 1 so a restart is not rejected while the previous socket sits
+    in TIME_WAIT, which is the right trade on POSIX. Windows gives SO_REUSEADDR *different*
+    semantics: it permits binding a port another socket is actively LISTENing on. So `flaky
+    serve --port 8080` against an occupied port silently started a second server, and two
+    processes then raced for the same port with requests landing on whichever won.
+
+    Found by adding windows-latest to CI -- `test_reports_a_port_clash_clearly` reported
+    DID NOT RAISE. The clash detection at `_build_server` was correct all along; the socket
+    option was quietly preventing the clash from happening.
+    """
 
     def handle_error(self, request: Any, client_address: Any) -> None:
         import sys

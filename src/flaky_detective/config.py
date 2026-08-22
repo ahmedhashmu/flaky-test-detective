@@ -117,6 +117,11 @@ EXAMPLE_CONFIG = """\
 [flaky]
 # Where run history is stored. Commit this file to share history across a team,
 # or cache it in CI. It is a plain SQLite database.
+#
+# Relative paths resolve against this file's directory. On Windows, use forward
+# slashes -- "C:/builds/history.db" -- or a single-quoted TOML literal string.
+# A double-quoted TOML string reads backslash as an escape, so a pasted Windows
+# path fails to parse as soon as a directory name begins with U, x, or n.
 db = ".flaky.db"
 
 # Where quarantine decisions are recorded.

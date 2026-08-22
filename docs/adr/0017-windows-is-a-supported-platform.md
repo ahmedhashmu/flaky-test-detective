@@ -71,7 +71,8 @@ is reproducible on Linux, which makes it debuggable without a Windows machine.
 
 ## What the audit found
 
-Four real defects and three cosmetic ones. None was hypothetical; each is a specific line.
+Four real defects and three cosmetic ones, before the matrix ran at all. None was
+hypothetical; each is a specific line.
 
 **1. Locale-codepage stdout (would fail).** Four `stdout.file.write()` calls bypass rich
 entirely, and `_emit` is the sink for eight commands. Fixed with a single
@@ -125,6 +126,35 @@ inherited it and would create `C:\tmp` at the drive root. The obvious replacemen
 exists at step level — and `github.workspace` would put the cache where the bundle-diff
 check looks. Removed: `setup-uv` already picks a correct per-platform location.
 
+## And then what the runner found that the audit had not
+
+The first `windows-latest` run failed on two tests. Both were worth having.
+
+**`flaky serve` silently ignored an occupied port (real bug).**
+`test_reports_a_port_clash_clearly` reported `DID NOT RAISE`. The clash detection was fine;
+the socket option was preventing the clash. `HTTPServer` sets `allow_reuse_address = 1` so a
+restart is not rejected while the old socket sits in TIME_WAIT — correct on POSIX. Windows
+gives SO_REUSEADDR *different* semantics: it permits binding a port another socket is
+actively LISTENing on. So `flaky serve --port 8080` against an occupied port started a
+second server, and two processes then raced for the port with requests landing on whichever
+won. Now `allow_reuse_address = os.name != "nt"`.
+
+This is the finding that justifies the whole exercise. No amount of reading POSIX-tested
+code would have surfaced it, because the code was right and the platform's definition of a
+constant was not.
+
+**A `.flaky.toml` on Windows cannot contain a pasted path (real, if narrower).**
+`test_absolute_paths_are_left_alone` built a config with an absolute `tmp_path`, and TOML
+read `\Users` as an escape: *Invalid hex value at line 2, column 11*. The test is now
+`as_posix()`, but the underlying fact affects users, not just the test — a Windows user
+pasting `db = "C:\builds\history.db"` gets a parse error whose cause is not obvious from the
+message. `EXAMPLE_CONFIG` now says to use forward slashes or a TOML literal string, which is
+where someone writing that line is actually looking.
+
+Worth noting what the error already did right: it named the file and reported the parser's
+own position, so it was a diagnostic rather than a traceback. The bad-input rule in the
+steering file held up.
+
 ## The bug this work introduced, and what it demonstrates
 
 The first version of the encoding fix called `_force_utf8_streams()` at module import.
@@ -160,8 +190,10 @@ claim this project is otherwise careful not to make.
 
 ## Rejected alternatives
 
-**Add the matrix, fix nothing, see what breaks.** It would have gone green and certified
-the encoding bug. This is the specific trap the ADR exists to record.
+**Add the matrix, fix nothing, see what breaks.** It would have caught the port clash and
+the TOML escape, and gone green on the encoding bug — certifying it. The matrix and the
+audit each found things the other could not, which is the argument for doing both rather
+than picking one.
 
 **Set `PYTHONUTF8=1` or `PYTHONIOENCODING` in the CI env and call it fixed.** Fixes CI and
 nobody's actual machine. The tool has to work when a user redirects its output, not only
