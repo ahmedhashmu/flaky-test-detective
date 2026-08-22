@@ -30,7 +30,7 @@ from .analysis import analyze as analyze_outcomes
 from .analysis import analyze_one
 from .analysis import triage as triage_run
 from .analysis.attribution import blame as blame_test
-from .benchmark import run_benchmark
+from .benchmark import realworld, run_benchmark
 from .benchmark import sweep as run_sweep
 from .config import EXAMPLE_CONFIG, Config, load_config
 from .environment import detect
@@ -41,6 +41,7 @@ from .quarantine import export as export_quarantine
 from .report import benchmark_report
 from .report import console as console_report
 from .report import issue as issue_report
+from .report import validation as validation_report
 from .runner import HuntError
 from .storage import Storage, StorageError
 
@@ -720,6 +721,47 @@ def benchmark(
 
     stderr.print(f"Unknown format {fmt!r}. Use console, md, or json.")
     raise typer.Exit(EXIT_USAGE)
+
+
+@app.command()
+def validate(
+    results_dir: Annotated[
+        Path,
+        typer.Argument(help="Directory of recorded validation results."),
+    ] = Path("validation/results"),
+    fmt: Annotated[str, typer.Option("--format", "-f", help="console, md, or json.")] = "console",
+    output: Annotated[
+        Path | None, typer.Option("--output", "-o", help="Write here instead of stdout.")
+    ] = None,
+) -> None:
+    """Score this tool against published flaky-test labels from real repositories.
+
+    Reads the recorded results in `validation/` and recomputes every number in
+    docs/real-world.md. Seconds, not hours: the raw output of each project's run is
+    committed, so the claim is checkable without cloning a dozen repositories.
+
+    Labels come from IDoFT, the Illinois dataset of flaky tests, so the answer key is
+    not ours. Re-run the underlying evaluation with `python validation/run.py`.
+    """
+    try:
+        raw, skipped = realworld.load_results(results_dir)
+    except FileNotFoundError as exc:
+        stderr.print(str(exc))
+        raise typer.Exit(EXIT_USAGE) from exc
+
+    result = realworld.score_all(raw, skipped=skipped)
+
+    if fmt == "console":
+        validation_report.render_console(result, stdout)
+        return
+
+    try:
+        rendered = validation_report.render(result, fmt)
+    except ValueError as exc:
+        stderr.print(str(exc))
+        raise typer.Exit(EXIT_USAGE) from exc
+
+    _emit(rendered, output)
 
 
 @quarantine_app.command("list")

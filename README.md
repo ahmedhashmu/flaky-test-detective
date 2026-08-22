@@ -64,7 +64,8 @@ Full detail, including the trust-score arithmetic: **[docs/dashboard.md](docs/da
 ## Contents
 
 - [The dashboard](#the-dashboard) · [The problem](#the-problem) ·
-  [What's different](#whats-different) · [Measured accuracy](#measured-accuracy)
+  [What's different](#whats-different) · [Measured accuracy](#measured-accuracy) ·
+  [Validated on real repositories](#validated-on-real-repositories)
 - [Install](#install) · [Quick start](#quick-start) ·
   [The command you'll use most](#the-command-youll-use-most)
 - [All commands](#all-commands) · [How it decides](#how-it-decides) ·
@@ -104,8 +105,9 @@ instead of investigate. **Measured false-alarm rate: 0.0%.**
 
 **It knows how often it's wrong.** `flaky benchmark` generates test histories with known
 ground truth, runs the real analysis over them, and reports precision and recall per
-verdict — including the weak numbers. Most tools in this space ask you to take accuracy on
-faith.
+verdict — including the weak numbers. Then `flaky validate` checks it against **12 real
+repositories** using flaky-test labels published by researchers: **99.4% recall, 100%
+precision, 0 false alarms.** Most tools in this space ask you to take accuracy on faith.
 
 **It tells you what to fix.** Not "this test is flaky" but "this test fails whenever it
 runs after `test_registers_session`, 100% of the time — reset that shared state in
@@ -139,6 +141,62 @@ The false-alarm rate is 0.0% across six different seeds. Two honest weak spots: 
 which is the design's central claim about same-commit divergence, confirmed by
 measurement. Full tables, the confusion matrix and what the benchmark cannot prove are in
 **[docs/accuracy.md](docs/accuracy.md)**.
+
+That benchmark has one unavoidable weakness, though: it measures the scoring rules against
+their own model of the world. So there is a second measurement.
+
+## Validated on real repositories
+
+Generated data cannot tell you whether a tool works on real software. This can.
+
+**12 open-source repositories · 288 suite runs · 41,585 test executions · 211 flaky-test
+labels we did not write.**
+
+| Metric | Value | Of |
+|---|---:|---|
+| **Recall** — labelled flakes found | **99.4%** | 174 / 175 that reproduced here |
+| **Precision** — flagged with same-commit proof | **100.0%** | 183 / 183 |
+| Consistently failing, correctly **not** called flaky | **20** | the false alarm that matters most |
+| Consistently failing, wrongly called flaky | **0** | |
+| Order dependence **diagnosed** | 11.6% | 17 / 146 |
+
+Labels come from [IDoFT](https://github.com/TestingResearchIllinois/idoft), the Illinois
+Dataset of Flaky Tests, where each entry is a repository, a commit SHA and a pytest node id
+confirmed by researchers and often by the project's own maintainers. **We did not write the
+answer key**, which removes the easiest way to produce a flattering result.
+
+Projects include [eppy](https://github.com/santoshphilip/eppy) (87 labels),
+[webssh](https://github.com/huashengdun/webssh) (29),
+[flask-smorest](https://github.com/marshmallow-code/flask-smorest) (16),
+[freezegun](https://github.com/spulec/freezegun) (15) and
+[microsoft/knack](https://github.com/microsoft/knack) (8).
+
+Precision is measured against **observed divergence** rather than against the dataset,
+because IDoFT is not exhaustive and counting an unlisted detection as wrong would
+understate precision by construction. A test that passed *and* failed at the same commit
+SHA in our own runs is flaky by observation, not inference. All 183 flagged tests show it.
+
+Check the numbers yourself in seconds — the raw output of every run is committed:
+
+```sh
+flaky validate validation/results
+```
+
+**The row that matters most is the third one.** Twenty labelled tests failed every single
+run here, making them broken in this environment whatever they were when the label was
+written. The detector called none of them flaky. The dataset itself was the temptation to
+get that wrong.
+
+**And the row that matters second-most is the last one.** The detector found 146 of 146
+order-dependent tests and *explained* only 17. The generated benchmark had scored order
+dependence at 1.000 precision and recall, because it places every polluter immediately
+before its victim — the exact assumption
+[ADR-0004](docs/adr/0004-order-dependence-needs-a-polluter.md) shipped with. Real suites
+shuffle, so the polluter is usually several tests back. A benchmark that agrees with your
+assumptions cannot correct them; real repositories did.
+
+Method, per-project results, the two projects that could not be built and every dependency
+pin required: **[docs/real-world.md](docs/real-world.md)**.
 
 ## Install
 
@@ -263,7 +321,8 @@ the evidence of itself to argue it is flaky.
 | `flaky triage <report>` | Known flakes vs new breakage for one run |
 | `flaky blame <test-id>` | Which commit introduced the flakiness |
 | `flaky merge <sources…>` | Pool history from other machines or CI shards |
-| `flaky benchmark` | Measure this tool's own accuracy |
+| `flaky benchmark` | Measure this tool's own accuracy against generated ground truth |
+| `flaky validate` | Score it against published labels from real repositories |
 | `flaky issue <test-id>` | Issue body or Slack message from the real diagnosis |
 | `flaky report -f md\|json\|html` | Render for a PR, a script, or a browser |
 | `flaky history <test-id>` | One test's timeline, run by run |
@@ -517,7 +576,7 @@ uv sync
 Substitute `pip install -e ".[dev]"` for `uv sync` and drop the `uv run` prefixes to use
 pip instead.
 
-**1. Test suite** — 654 tests, about 16 seconds:
+**1. Test suite** — 685 tests, about 16 seconds:
 
 ```sh
 uv run pytest
@@ -670,7 +729,8 @@ fixtures were written to their documented formats, with provenance recorded in
 | [docs/dashboard.md](docs/dashboard.md) | The web dashboard, trust score and API |
 | [docs/architecture.md](docs/architecture.md) | Pipeline, data model and verdict-flow diagrams |
 | [docs/scoring.md](docs/scoring.md) | The maths, and why each weight is what it is |
-| [docs/accuracy.md](docs/accuracy.md) | Precision and recall against ground truth |
+| [docs/accuracy.md](docs/accuracy.md) | Precision and recall against generated ground truth |
+| [docs/real-world.md](docs/real-world.md) | Validation on 12 real repositories with published labels |
 | [docs/ci-integration.md](docs/ci-integration.md) | Recipes, including sharded builds |
 | [docs/adr/](docs/adr/) | Decision records, including the ones that were wrong first |
 | [.kiro/specs/](.kiro/specs/) | Requirements, design and tasks for all three rounds |

@@ -1,0 +1,12 @@
+[
+  {
+    "reason": "collection failed (exit 2): \n    optional_patterns = re.findall('\\[(.*?)\\]', pattern)\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ============================\nERROR grabbit/tests/test_core.py\nERROR grabbit/tests/test_writable.py\n!!!!!!!!!!!!!!!!!!! Interrupted: 2 errors during collection !!!!!!!!!!!!!!!!!!!!\nno tests collected, 2 errors in 0.15s",
+    "repo": "grabbles/grabbit",
+    "sha": "83ff93df36019eaaee9d4e31f816a518e46cae07"
+  },
+  {
+    "reason": "collection failed (exit 2): arn('Attribute {} is empty.'.format(attr_name))\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ============================\nERROR pyradigm/tests/test_classify_dataset.py - AttributeError: module 'numpy...\n!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!\n78 tests collected, 1 error in 9.53s",
+    "repo": "raamana/pyradigm",
+    "sha": "01d47cf34a9af4bb104e2891559059a522221b4d"
+  }
+]

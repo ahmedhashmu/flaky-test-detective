@@ -19,6 +19,7 @@ what changed is the part that transfers.
 | [0008](0008-composite-github-action.md) | Ship a composite GitHub Action | Accepted |
 | [0009](0009-explainable-trust-score.md) | An explainable trust score, not a fitted index | Accepted |
 | [0010](0010-dashboard-on-the-standard-library.md) | Ship the dashboard in the package, on the standard library | Accepted |
+| [0011](0011-validate-against-real-repositories.md) | Validate against real repositories, using labels we did not write | Accepted |
 
 ## Format
 

@@ -1,0 +1,815 @@
+{
+  "collected": 22,
+  "dataset_sha": "4903dc9233eead4e4191c66f9ed0b14eea091052",
+  "hunt": {
+    "hunt_output_mentions_shuffle": false,
+    "seconds": 342.0
+  },
+  "iterations": 24,
+  "labels": {
+    "tests/test_class.py::test_cached": "OD-Vic",
+    "tests/test_class.py::test_keyed_cached": "OD-Vic",
+    "tests/test_class.py::test_utility": "OD-Vic",
+    "tests/test_collide.py::test_avoid_collision": "NIO",
+    "tests/test_gc.py::test_deco_timeout": "NOD",
+    "tests/test_noclass.py::test_main": "OD-Vic",
+    "tests/test_serialization.py::test_serialization": "NIO"
+  },
+  "pins": [],
+  "python": "3.9",
+  "repo": "mtik00/yamicache",
+  "report": {
+    "clusters": [
+      {
+        "cause": "assertion",
+        "failure_count": 12,
+        "representative_message": "assert 2 == 1\n +  where 2 = len(<yamicache.yamicache.Cache object at 0x10a994e80>)",
+        "signature": "assert 2 == 1",
+        "test_count": 2,
+        "test_ids": [
+          "tests/test_class.py::test_cached",
+          "tests/test_class.py::test_keyed_cached"
+        ]
+      },
+      {
+        "cause": "race",
+        "failure_count": 24,
+        "representative_message": "RuntimeError: can't start new thread",
+        "signature": "RuntimeError: can't start new thread",
+        "test_count": 1,
+        "test_ids": [
+          "tests/test_threading.py::test_multithreading"
+        ]
+      },
+      {
+        "cause": "assertion",
+        "failure_count": 8,
+        "representative_message": "assert 3 == 0\n +  where 3 = len(<yamicache.yamicache.Cache object at 0x1061ef9a0>)",
+        "signature": "assert 3 == 0",
+        "test_count": 1,
+        "test_ids": [
+          "tests/test_noclass.py::test_main"
+        ]
+      },
+      {
+        "cause": "assertion",
+        "failure_count": 6,
+        "representative_message": "assert 5 == 4\n +  where 5 = len(<yamicache.yamicache.Cache object at 0x10a994e80>)",
+        "signature": "assert 5 == 4",
+        "test_count": 1,
+        "test_ids": [
+          "tests/test_class.py::test_utility"
+        ]
+      },
+      {
+        "cause": "assertion",
+        "failure_count": 5,
+        "representative_message": "assert 2 == 0\n +  where 2 = len(<yamicache.yamicache.Cache object at 0x10a0397f0>)",
+        "signature": "assert 2 == 0",
+        "test_count": 1,
+        "test_ids": [
+          "tests/test_noclass.py::test_main"
+        ]
+      },
+      {
+        "cause": "assertion",
+        "failure_count": 2,
+        "representative_message": "assert 1 == 0\n +  where 1 = len(<yamicache.yamicache.Cache object at 0x10a351a30>)",
+        "signature": "assert 1 == 0",
+        "test_count": 1,
+        "test_ids": [
+          "tests/test_noclass.py::test_main"
+        ]
+      },
+      {
+        "cause": "assertion",
+        "failure_count": 1,
+        "representative_message": "assert 5 == 1\n +  where 5 = len(<yamicache.yamicache.Cache object at 0x108ae0e20>)",
+        "signature": "assert 5 == 1",
+        "test_count": 1,
+        "test_ids": [
+          "tests/test_class.py::test_keyed_cached"
+        ]
+      }
+    ],
+    "schema_version": 1,
+    "summary": {
+      "broken": 1,
+      "commit_coverage": 1.0,
+      "fixed": 0,
+      "flaky": 4,
+      "has_commit_data": true,
+      "regressions": 0,
+      "results": 528,
+      "runs": 24,
+      "tests": 22,
+      "threshold": 0.15,
+      "window_end": "2026-08-22T14:04:48.052897+05:00",
+      "window_start": "2026-08-22T13:59:22.031054+05:00"
+    },
+    "tests": [
+      {
+        "cause": {
+          "category": "order_dependence",
+          "confidence": 0.9,
+          "matched": [
+            "position separation 0.6x",
+            "fails after tests/test_class.py::test_timeout"
+          ],
+          "remediation": "Reset the shared state in setup or teardown so the outcome does not depend on what ran before it."
+        },
+        "consecutive_passes": 2,
+        "evidence": {
+          "confidence": 1.0,
+          "divergence_rate": 1.0,
+          "divergent_commits": 1,
+          "failure_rate": 0.3333,
+          "failures": 8,
+          "flip_rate": 0.4348,
+          "flips": 10,
+          "observed_commits": 1,
+          "passes": 16,
+          "retries": 0,
+          "runs": 24,
+          "skips": 0
+        },
+        "first_seen": "2026-08-22T13:59:22.031054+05:00",
+        "last_seen": "2026-08-22T14:04:48.052897+05:00",
+        "last_status": "passed",
+        "name": "test_cached",
+        "order_dependence": {
+          "likely_polluter": "tests/test_class.py::test_timeout",
+          "mean_position_on_fail": 7.4,
+          "mean_position_on_pass": 10.4,
+          "polluter_failure_share": 1.0,
+          "separation": 0.62
+        },
+        "representative_message": "assert 2 == 1\n +  where 2 = len(<yamicache.yamicache.Cache object at 0x10a994e80>)",
+        "score": 0.8304,
+        "signatures": [
+          "assert 2 == 1"
+        ],
+        "suite": "pytest",
+        "test_id": "tests/test_class.py::test_cached",
+        "verdict": "flaky"
+      },
+      {
+        "cause": {
+          "category": "order_dependence",
+          "confidence": 0.9,
+          "matched": [
+            "position separation 0.0x",
+            "fails after tests/test_noclass.py::test_object_list"
+          ],
+          "remediation": "Reset the shared state in setup or teardown so the outcome does not depend on what ran before it."
+        },
+        "consecutive_passes": 0,
+        "evidence": {
+          "confidence": 1.0,
+          "divergence_rate": 1.0,
+          "divergent_commits": 1,
+          "failure_rate": 0.625,
+          "failures": 15,
+          "flip_rate": 0.4348,
+          "flips": 10,
+          "observed_commits": 1,
+          "passes": 9,
+          "retries": 0,
+          "runs": 24,
+          "skips": 0
+        },
+        "first_seen": "2026-08-22T13:59:22.031054+05:00",
+        "last_seen": "2026-08-22T14:04:48.052897+05:00",
+        "last_status": "failed",
+        "name": "test_main",
+        "order_dependence": {
+          "likely_polluter": "tests/test_noclass.py::test_object_list",
+          "mean_position_on_fail": 9.5,
+          "mean_position_on_pass": 9.3,
+          "polluter_failure_share": 1.0,
+          "separation": 0.03
+        },
+        "representative_message": "assert 3 == 0\n +  where 3 = len(<yamicache.yamicache.Cache object at 0x1061ef9a0>)",
+        "score": 0.8304,
+        "signatures": [
+          "assert 3 == 0",
+          "assert 2 == 0",
+          "assert 1 == 0"
+        ],
+        "suite": "pytest",
+        "test_id": "tests/test_noclass.py::test_main",
+        "verdict": "flaky"
+      },
+      {
+        "cause": {
+          "category": "assertion",
+          "confidence": 0.2,
+          "matched": [
+            "assert"
+          ],
+          "remediation": "Nothing environmental in the message. Diff a passing run against a failing one to find what actually differs."
+        },
+        "consecutive_passes": 3,
+        "evidence": {
+          "confidence": 1.0,
+          "divergence_rate": 1.0,
+          "divergent_commits": 1,
+          "failure_rate": 0.2083,
+          "failures": 5,
+          "flip_rate": 0.3478,
+          "flips": 8,
+          "observed_commits": 1,
+          "passes": 19,
+          "retries": 0,
+          "runs": 24,
+          "skips": 0
+        },
+        "first_seen": "2026-08-22T13:59:22.031054+05:00",
+        "last_seen": "2026-08-22T14:04:48.052897+05:00",
+        "last_status": "passed",
+        "name": "test_keyed_cached",
+        "order_dependence": null,
+        "representative_message": "assert 2 == 1\n +  where 2 = len(<yamicache.yamicache.Cache object at 0x10a62ce20>)",
+        "score": 0.8043,
+        "signatures": [
+          "assert 2 == 1",
+          "assert 5 == 1"
+        ],
+        "suite": "pytest",
+        "test_id": "tests/test_class.py::test_keyed_cached",
+        "verdict": "flaky"
+      },
+      {
+        "cause": {
+          "category": "assertion",
+          "confidence": 0.2,
+          "matched": [
+            "assert"
+          ],
+          "remediation": "Nothing environmental in the message. Diff a passing run against a failing one to find what actually differs."
+        },
+        "consecutive_passes": 2,
+        "evidence": {
+          "confidence": 1.0,
+          "divergence_rate": 1.0,
+          "divergent_commits": 1,
+          "failure_rate": 0.25,
+          "failures": 6,
+          "flip_rate": 0.3478,
+          "flips": 8,
+          "observed_commits": 1,
+          "passes": 18,
+          "retries": 0,
+          "runs": 24,
+          "skips": 0
+        },
+        "first_seen": "2026-08-22T13:59:22.031054+05:00",
+        "last_seen": "2026-08-22T14:04:48.052897+05:00",
+        "last_status": "passed",
+        "name": "test_utility",
+        "order_dependence": null,
+        "representative_message": "assert 5 == 4\n +  where 5 = len(<yamicache.yamicache.Cache object at 0x10a994e80>)",
+        "score": 0.8043,
+        "signatures": [
+          "assert 5 == 4"
+        ],
+        "suite": "pytest",
+        "test_id": "tests/test_class.py::test_utility",
+        "verdict": "flaky"
+      },
+      {
+        "cause": null,
+        "consecutive_passes": 24,
+        "evidence": {
+          "confidence": 1.0,
+          "divergence_rate": 0.0,
+          "divergent_commits": 0,
+          "failure_rate": 0.0,
+          "failures": 0,
+          "flip_rate": 0.0,
+          "flips": 0,
+          "observed_commits": 1,
+          "passes": 24,
+          "retries": 0,
+          "runs": 24,
+          "skips": 0
+        },
+        "first_seen": "2026-08-22T13:59:22.031054+05:00",
+        "last_seen": "2026-08-22T14:04:48.052897+05:00",
+        "last_status": "passed",
+        "name": "test_counters",
+        "order_dependence": null,
+        "representative_message": null,
+        "score": 0.0,
+        "signatures": [],
+        "suite": "pytest",
+        "test_id": "tests/test_class.py::test_counters",
+        "verdict": "stable"
+      },
+      {
+        "cause": null,
+        "consecutive_passes": 24,
+        "evidence": {
+          "confidence": 1.0,
+          "divergence_rate": 0.0,
+          "divergent_commits": 0,
+          "failure_rate": 0.0,
+          "failures": 0,
+          "flip_rate": 0.0,
+          "flips": 0,
+          "observed_commits": 1,
+          "passes": 24,
+          "retries": 0,
+          "runs": 24,
+          "skips": 0
+        },
+        "first_seen": "2026-08-22T13:59:22.031054+05:00",
+        "last_seen": "2026-08-22T14:04:48.052897+05:00",
+        "last_status": "passed",
+        "name": "test_nocache",
+        "order_dependence": null,
+        "representative_message": null,
+        "score": 0.0,
+        "signatures": [],
+        "suite": "pytest",
+        "test_id": "tests/test_class.py::test_nocache",
+        "verdict": "stable"
+      },
+      {
+        "cause": null,
+        "consecutive_passes": 24,
+        "evidence": {
+          "confidence": 1.0,
+          "divergence_rate": 0.0,
+          "divergent_commits": 0,
+          "failure_rate": 0.0,
+          "failures": 0,
+          "flip_rate": 0.0,
+          "flips": 0,
+          "observed_commits": 1,
+          "passes": 24,
+          "retries": 0,
+          "runs": 24,
+          "skips": 0
+        },
+        "first_seen": "2026-08-22T13:59:22.031054+05:00",
+        "last_seen": "2026-08-22T14:04:48.052897+05:00",
+        "last_status": "passed",
+        "name": "test_prefix",
+        "order_dependence": null,
+        "representative_message": null,
+        "score": 0.0,
+        "signatures": [],
+        "suite": "pytest",
+        "test_id": "tests/test_class.py::test_prefix",
+        "verdict": "stable"
+      },
+      {
+        "cause": null,
+        "consecutive_passes": 24,
+        "evidence": {
+          "confidence": 1.0,
+          "divergence_rate": 0.0,
+          "divergent_commits": 0,
+          "failure_rate": 0.0,
+          "failures": 0,
+          "flip_rate": 0.0,
+          "flips": 0,
+          "observed_commits": 1,
+          "passes": 24,
+          "retries": 0,
+          "runs": 24,
+          "skips": 0
+        },
+        "first_seen": "2026-08-22T13:59:22.031054+05:00",
+        "last_seen": "2026-08-22T14:04:48.052897+05:00",
+        "last_status": "passed",
+        "name": "test_timeout",
+        "order_dependence": null,
+        "representative_message": null,
+        "score": 0.0,
+        "signatures": [],
+        "suite": "pytest",
+        "test_id": "tests/test_class.py::test_timeout",
+        "verdict": "stable"
+      },
+      {
+        "cause": null,
+        "consecutive_passes": 24,
+        "evidence": {
+          "confidence": 1.0,
+          "divergence_rate": 0.0,
+          "divergent_commits": 0,
+          "failure_rate": 0.0,
+          "failures": 0,
+          "flip_rate": 0.0,
+          "flips": 0,
+          "observed_commits": 1,
+          "passes": 24,
+          "retries": 0,
+          "runs": 24,
+          "skips": 0
+        },
+        "first_seen": "2026-08-22T13:59:22.031054+05:00",
+        "last_seen": "2026-08-22T14:04:48.052897+05:00",
+        "last_status": "passed",
+        "name": "test_clear",
+        "order_dependence": null,
+        "representative_message": null,
+        "score": 0.0,
+        "signatures": [],
+        "suite": "pytest",
+        "test_id": "tests/test_clear_deco.py::test_clear",
+        "verdict": "stable"
+      },
+      {
+        "cause": null,
+        "consecutive_passes": 24,
+        "evidence": {
+          "confidence": 1.0,
+          "divergence_rate": 0.0,
+          "divergent_commits": 0,
+          "failure_rate": 0.0,
+          "failures": 0,
+          "flip_rate": 0.0,
+          "flips": 0,
+          "observed_commits": 1,
+          "passes": 24,
+          "retries": 0,
+          "runs": 24,
+          "skips": 0
+        },
+        "first_seen": "2026-08-22T13:59:22.031054+05:00",
+        "last_seen": "2026-08-22T14:04:48.052897+05:00",
+        "last_status": "passed",
+        "name": "test_avoid_collision",
+        "order_dependence": null,
+        "representative_message": null,
+        "score": 0.0,
+        "signatures": [],
+        "suite": "pytest",
+        "test_id": "tests/test_collide.py::test_avoid_collision",
+        "verdict": "stable"
+      },
+      {
+        "cause": null,
+        "consecutive_passes": 24,
+        "evidence": {
+          "confidence": 1.0,
+          "divergence_rate": 0.0,
+          "divergent_commits": 0,
+          "failure_rate": 0.0,
+          "failures": 0,
+          "flip_rate": 0.0,
+          "flips": 0,
+          "observed_commits": 1,
+          "passes": 24,
+          "retries": 0,
+          "runs": 24,
+          "skips": 0
+        },
+        "first_seen": "2026-08-22T13:59:22.031054+05:00",
+        "last_seen": "2026-08-22T14:04:48.052897+05:00",
+        "last_status": "passed",
+        "name": "test_raises",
+        "order_dependence": null,
+        "representative_message": null,
+        "score": 0.0,
+        "signatures": [],
+        "suite": "pytest",
+        "test_id": "tests/test_collide.py::test_raises",
+        "verdict": "stable"
+      },
+      {
+        "cause": null,
+        "consecutive_passes": 24,
+        "evidence": {
+          "confidence": 1.0,
+          "divergence_rate": 0.0,
+          "divergent_commits": 0,
+          "failure_rate": 0.0,
+          "failures": 0,
+          "flip_rate": 0.0,
+          "flips": 0,
+          "observed_commits": 1,
+          "passes": 24,
+          "retries": 0,
+          "runs": 24,
+          "skips": 0
+        },
+        "first_seen": "2026-08-22T13:59:22.031054+05:00",
+        "last_seen": "2026-08-22T14:04:48.052897+05:00",
+        "last_status": "passed",
+        "name": "test_main",
+        "order_dependence": null,
+        "representative_message": null,
+        "score": 0.0,
+        "signatures": [],
+        "suite": "pytest",
+        "test_id": "tests/test_default_args.py::test_main",
+        "verdict": "stable"
+      },
+      {
+        "cause": null,
+        "consecutive_passes": 24,
+        "evidence": {
+          "confidence": 1.0,
+          "divergence_rate": 0.0,
+          "divergent_commits": 0,
+          "failure_rate": 0.0,
+          "failures": 0,
+          "flip_rate": 0.0,
+          "flips": 0,
+          "observed_commits": 1,
+          "passes": 24,
+          "retries": 0,
+          "runs": 24,
+          "skips": 0
+        },
+        "first_seen": "2026-08-22T13:59:22.031054+05:00",
+        "last_seen": "2026-08-22T14:04:48.052897+05:00",
+        "last_status": "passed",
+        "name": "test_function",
+        "order_dependence": null,
+        "representative_message": null,
+        "score": 0.0,
+        "signatures": [],
+        "suite": "pytest",
+        "test_id": "tests/test_exceptions.py::test_function",
+        "verdict": "stable"
+      },
+      {
+        "cause": null,
+        "consecutive_passes": 24,
+        "evidence": {
+          "confidence": 1.0,
+          "divergence_rate": 0.0,
+          "divergent_commits": 0,
+          "failure_rate": 0.0,
+          "failures": 0,
+          "flip_rate": 0.0,
+          "flips": 0,
+          "observed_commits": 1,
+          "passes": 24,
+          "retries": 0,
+          "runs": 24,
+          "skips": 0
+        },
+        "first_seen": "2026-08-22T13:59:22.031054+05:00",
+        "last_seen": "2026-08-22T14:04:48.052897+05:00",
+        "last_status": "passed",
+        "name": "test_object_creation",
+        "order_dependence": null,
+        "representative_message": null,
+        "score": 0.0,
+        "signatures": [],
+        "suite": "pytest",
+        "test_id": "tests/test_exceptions.py::test_object_creation",
+        "verdict": "stable"
+      },
+      {
+        "cause": null,
+        "consecutive_passes": 24,
+        "evidence": {
+          "confidence": 1.0,
+          "divergence_rate": 0.0,
+          "divergent_commits": 0,
+          "failure_rate": 0.0,
+          "failures": 0,
+          "flip_rate": 0.0,
+          "flips": 0,
+          "observed_commits": 1,
+          "passes": 24,
+          "retries": 0,
+          "runs": 24,
+          "skips": 0
+        },
+        "first_seen": "2026-08-22T13:59:22.031054+05:00",
+        "last_seen": "2026-08-22T14:04:48.052897+05:00",
+        "last_status": "passed",
+        "name": "test_deco_timeout",
+        "order_dependence": null,
+        "representative_message": null,
+        "score": 0.0,
+        "signatures": [],
+        "suite": "pytest",
+        "test_id": "tests/test_gc.py::test_deco_timeout",
+        "verdict": "stable"
+      },
+      {
+        "cause": null,
+        "consecutive_passes": 24,
+        "evidence": {
+          "confidence": 1.0,
+          "divergence_rate": 0.0,
+          "divergent_commits": 0,
+          "failure_rate": 0.0,
+          "failures": 0,
+          "flip_rate": 0.0,
+          "flips": 0,
+          "observed_commits": 1,
+          "passes": 24,
+          "retries": 0,
+          "runs": 24,
+          "skips": 0
+        },
+        "first_seen": "2026-08-22T13:59:22.031054+05:00",
+        "last_seen": "2026-08-22T14:04:48.052897+05:00",
+        "last_status": "passed",
+        "name": "test_gc",
+        "order_dependence": null,
+        "representative_message": null,
+        "score": 0.0,
+        "signatures": [],
+        "suite": "pytest",
+        "test_id": "tests/test_gc.py::test_gc",
+        "verdict": "stable"
+      },
+      {
+        "cause": null,
+        "consecutive_passes": 24,
+        "evidence": {
+          "confidence": 1.0,
+          "divergence_rate": 0.0,
+          "divergent_commits": 0,
+          "failure_rate": 0.0,
+          "failures": 0,
+          "flip_rate": 0.0,
+          "flips": 0,
+          "observed_commits": 1,
+          "passes": 24,
+          "retries": 0,
+          "runs": 24,
+          "skips": 0
+        },
+        "first_seen": "2026-08-22T13:59:22.031054+05:00",
+        "last_seen": "2026-08-22T14:04:48.052897+05:00",
+        "last_status": "passed",
+        "name": "test_gc2",
+        "order_dependence": null,
+        "representative_message": null,
+        "score": 0.0,
+        "signatures": [],
+        "suite": "pytest",
+        "test_id": "tests/test_gc.py::test_gc2",
+        "verdict": "stable"
+      },
+      {
+        "cause": null,
+        "consecutive_passes": 24,
+        "evidence": {
+          "confidence": 1.0,
+          "divergence_rate": 0.0,
+          "divergent_commits": 0,
+          "failure_rate": 0.0,
+          "failures": 0,
+          "flip_rate": 0.0,
+          "flips": 0,
+          "observed_commits": 1,
+          "passes": 24,
+          "retries": 0,
+          "runs": 24,
+          "skips": 0
+        },
+        "first_seen": "2026-08-22T13:59:22.031054+05:00",
+        "last_seen": "2026-08-22T14:04:48.052897+05:00",
+        "last_status": "passed",
+        "name": "test_init_cache",
+        "order_dependence": null,
+        "representative_message": null,
+        "score": 0.0,
+        "signatures": [],
+        "suite": "pytest",
+        "test_id": "tests/test_init.py::test_init_cache",
+        "verdict": "stable"
+      },
+      {
+        "cause": null,
+        "consecutive_passes": 24,
+        "evidence": {
+          "confidence": 1.0,
+          "divergence_rate": 0.0,
+          "divergent_commits": 0,
+          "failure_rate": 0.0,
+          "failures": 0,
+          "flip_rate": 0.0,
+          "flips": 0,
+          "observed_commits": 1,
+          "passes": 24,
+          "retries": 0,
+          "runs": 24,
+          "skips": 0
+        },
+        "first_seen": "2026-08-22T13:59:22.031054+05:00",
+        "last_seen": "2026-08-22T14:04:48.052897+05:00",
+        "last_status": "passed",
+        "name": "test_lists",
+        "order_dependence": null,
+        "representative_message": null,
+        "score": 0.0,
+        "signatures": [],
+        "suite": "pytest",
+        "test_id": "tests/test_noclass.py::test_lists",
+        "verdict": "stable"
+      },
+      {
+        "cause": null,
+        "consecutive_passes": 24,
+        "evidence": {
+          "confidence": 1.0,
+          "divergence_rate": 0.0,
+          "divergent_commits": 0,
+          "failure_rate": 0.0,
+          "failures": 0,
+          "flip_rate": 0.0,
+          "flips": 0,
+          "observed_commits": 1,
+          "passes": 24,
+          "retries": 0,
+          "runs": 24,
+          "skips": 0
+        },
+        "first_seen": "2026-08-22T13:59:22.031054+05:00",
+        "last_seen": "2026-08-22T14:04:48.052897+05:00",
+        "last_status": "passed",
+        "name": "test_object_list",
+        "order_dependence": null,
+        "representative_message": null,
+        "score": 0.0,
+        "signatures": [],
+        "suite": "pytest",
+        "test_id": "tests/test_noclass.py::test_object_list",
+        "verdict": "stable"
+      },
+      {
+        "cause": null,
+        "consecutive_passes": 24,
+        "evidence": {
+          "confidence": 1.0,
+          "divergence_rate": 0.0,
+          "divergent_commits": 0,
+          "failure_rate": 0.0,
+          "failures": 0,
+          "flip_rate": 0.0,
+          "flips": 0,
+          "observed_commits": 1,
+          "passes": 24,
+          "retries": 0,
+          "runs": 24,
+          "skips": 0
+        },
+        "first_seen": "2026-08-22T13:59:22.031054+05:00",
+        "last_seen": "2026-08-22T14:04:48.052897+05:00",
+        "last_status": "passed",
+        "name": "test_serialization",
+        "order_dependence": null,
+        "representative_message": null,
+        "score": 0.0,
+        "signatures": [],
+        "suite": "pytest",
+        "test_id": "tests/test_serialization.py::test_serialization",
+        "verdict": "stable"
+      },
+      {
+        "cause": {
+          "category": "race",
+          "confidence": 0.76,
+          "matched": [
+            "thread"
+          ],
+          "remediation": "Serialize access to the shared resource, or give each test its own instance so there is nothing to contend over."
+        },
+        "consecutive_passes": 0,
+        "evidence": {
+          "confidence": 1.0,
+          "divergence_rate": 0.0,
+          "divergent_commits": 0,
+          "failure_rate": 1.0,
+          "failures": 24,
+          "flip_rate": 0.0,
+          "flips": 0,
+          "observed_commits": 1,
+          "passes": 0,
+          "retries": 0,
+          "runs": 24,
+          "skips": 0
+        },
+        "first_seen": "2026-08-22T13:59:22.031054+05:00",
+        "last_seen": "2026-08-22T14:04:48.052897+05:00",
+        "last_status": "failed",
+        "name": "test_multithreading",
+        "order_dependence": null,
+        "representative_message": "RuntimeError: can't start new thread",
+        "score": 0.0,
+        "signatures": [
+          "RuntimeError: can't start new thread"
+        ],
+        "suite": "pytest",
+        "test_id": "tests/test_threading.py::test_multithreading",
+        "verdict": "broken"
+      }
+    ]
+  },
+  "sha": "1109d08b18be94bdee55e113309f7be29f25d840",
+  "why": "Caching library with a mix of causes: 4 OD-Vic, 3 NIO, 1 NOD."
+}

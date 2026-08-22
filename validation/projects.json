@@ -1,0 +1,99 @@
+{
+  "dataset": {
+    "source": "https://github.com/TestingResearchIllinois/idoft",
+    "file": "py-data.csv",
+    "note": "Cloned at run time. The SHA of the dataset clone is recorded in each result file so a number can be tied to the exact label set it was scored against."
+  },
+  "defaults": {
+    "iterations": 24,
+    "python": "3.9",
+    "pytest": "pytest",
+    "shuffle_plugin": "pytest-random-order"
+  },
+  "projects": [
+    {
+      "repo": "spulec/freezegun",
+      "sha": "b46da782a7a051081fd51577749cfc0074db0cc6",
+      "why": "Widely used time-mocking library. 15 order-dependent victims labelled, and a clean baseline: nothing fails in the default order, so any failure we record is genuinely order-induced."
+    },
+    {
+      "repo": "microsoft/knack",
+      "sha": "dc7b7d857ce3c11b2a3155b81f2470b3b579e7c9",
+      "why": "The CLI framework underneath Azure CLI. 232 tests, clean baseline, 8 labelled victims."
+    },
+    {
+      "repo": "didix21/mdutils",
+      "sha": "2ef859ecc1e4f1a3e24f4150c96f61180bc57ceb",
+      "why": "All 8 labelled victims fail even in the default order here, which makes it the case that tests whether the detector correctly refuses to call a consistently failing test flaky."
+    },
+    {
+      "repo": "laike9m/pdir2",
+      "sha": "ef5e2200074d68e2ca3df4ee441a1b9ea6ca5abc",
+      "why": "6 OD-Brit entries: tests that fail alone and pass after something else has run. The mirror image of the usual victim case."
+    },
+    {
+      "repo": "mtik00/yamicache",
+      "sha": "1109d08b18be94bdee55e113309f7be29f25d840",
+      "why": "Caching library with a mix of causes: 4 OD-Vic, 3 NIO, 1 NOD."
+    },
+    {
+      "repo": "hefnawi/json-storage-manager",
+      "sha": "c7521fc4a576cf23a8c2454106bed6fb8c951b8d",
+      "why": "Small suite sharing a JSON file between tests, the archetypal shared-state polluter."
+    },
+    {
+      "repo": "chaosmail/python-fs",
+      "sha": "2567922ced9387e327e65f3244caff3b7af35684",
+      "why": "5 NIO entries, included precisely because this tool is expected to miss most of them. Kept in to make that limitation visible rather than convenient."
+    },
+    {
+      "repo": "raamana/pyradigm",
+      "sha": "01d47cf34a9af4bb104e2891559059a522221b4d",
+      "python": "3.9",
+      "pins": ["numpy<2"],
+      "why": "15 labelled victims in a numpy-backed suite, so the sample is not only pure-Python projects. Held below numpy 2 because the suite uses np.NaN, which numpy 2 removed."
+    },
+    {
+      "repo": "santoshphilip/eppy",
+      "sha": "98e58583dce6c0fcec9c7b1ff1142bae0a67ddc7",
+      "python": "3.9",
+      "pins": ["pytest>=7", "attrs<21"],
+      "requirements": false,
+      "why": "83 labelled victims, the largest single contribution to the sample. Its requirements.txt pins a pytest from 2016 that cannot import under a modern attrs, so pytest is pinned forward instead and the pin is recorded here rather than applied silently."
+    },
+    {
+      "repo": "marshmallow-code/flask-smorest",
+      "sha": "02e9e84def5ace80522c76b830fbef9930a28771",
+      "python": "3.9",
+      "pins": ["flask<2.0", "werkzeug<2.0", "marshmallow<3.13", "itsdangerous<2.0", "jinja2<3.0", "markupsafe<2.1"],
+      "why": "16 labelled victims. The SHA predates several Flask 2.x removals, so the whole Flask stack is held at the era it was written for."
+    },
+    {
+      "repo": "voytekresearch/fooof",
+      "sha": "7a520c4f8ac3a44f4f18dc025b5e5d40049c9f2b",
+      "python": "3.9",
+      "pins": ["numpy<2", "scipy<1.11", "setuptools<81", "py"],
+      "why": "Scientific-computing suite, 9 OD-Brit and 2 OD-Vic. Needs setuptools below 81, which is where pkg_resources was removed; this suite imports it at collection time."
+    },
+    {
+      "repo": "django-beam/django-beam",
+      "sha": "43b2111f5c65937aa1e2cc9704b59796e982a805",
+      "python": "3.9",
+      "pins": ["django<4"],
+      "why": "11 NOD entries. Included because the order-dependent cases dominate this sample, and a detector that only ever sees ordering bugs has not been tested on the timing half of the problem."
+    },
+    {
+      "repo": "grabbles/grabbit",
+      "sha": "83ff93df36019eaaee9d4e31f816a518e46cae07",
+      "python": "3.9",
+      "why": "5 NOD entries in a file-indexing library."
+    },
+    {
+      "repo": "huashengdun/webssh",
+      "sha": "51d527fe75a62aed239126a6697749a30baecb30",
+      "python": "3.9",
+      "pins": ["six", "tornado==5.1.1", "paramiko<3", "pytest<7"],
+      "why": "20 NOD entries, and the only source of non-order-dependent labels in the sample. Network sockets and Tornado IO loops, so the flakiness here is timing rather than ordering, which is the other half of the problem this tool claims to solve."
+    }
+  ]
+}

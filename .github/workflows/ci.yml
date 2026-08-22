@@ -223,6 +223,45 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           uv run flaky benchmark --format json --output artifacts/accuracy.json
 
+      # Part two and a half: the real-world numbers. Scoring the committed results takes
+      # seconds and needs no network, so there is no excuse for the figures in
+      # docs/real-world.md to drift away from the recorded runs they came from. The
+      # thresholds below are the published claims; if a scoring change moves them, this
+      # fails and the documentation gets updated deliberately rather than silently.
+      - name: Re-score the real-world validation
+        run: |
+          mkdir -p artifacts
+          uv run flaky validate validation/results >> "$GITHUB_STEP_SUMMARY"
+          uv run flaky validate validation/results --format json --output artifacts/real-world.json
+
+          python3 - <<'PY'
+          import json, pathlib
+
+          published = pathlib.Path("artifacts/real-world.json")
+          data = json.loads(published.read_text())
+
+          checks = {
+              "repositories": (data["repositories"], 12),
+              "labels_detected": (data["labels_detected"], 174),
+              "labels_reproduced": (data["labels_reproduced"], 175),
+              "flagged": (data["flagged"], 183),
+              "flagged_with_divergence": (data["flagged_with_divergence"], 183),
+              "wrongly_called_flaky": (data["wrongly_called_flaky"], 0),
+          }
+          problems = [
+              f"{name}: scored {got}, README and docs/real-world.md claim {want}"
+              for name, (got, want) in checks.items()
+              if got != want
+          ]
+          if problems:
+              for problem in problems:
+                  print(f"::error::{problem}")
+              raise SystemExit(1)
+
+          print(f"recall {data['recall']:.1%}, precision {data['precision']:.1%} "
+                f"over {data['repositories']} repositories -- matches the published figures")
+          PY
+
       # Part three: prove history merges correctly across independent machines.
       - name: Verify history merging
         run: |

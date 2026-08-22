@@ -1,0 +1,405 @@
+{
+  "collected": 9,
+  "dataset_sha": "4903dc9233eead4e4191c66f9ed0b14eea091052",
+  "hunt": {
+    "hunt_output_mentions_shuffle": false,
+    "seconds": 4.3
+  },
+  "iterations": 24,
+  "labels": {
+    "tests/test_main.py::test_get_item": "OD-Brit",
+    "tests/test_main.py::test_get_no_item": "OD-Vic",
+    "tests/test_main.py::test_read_json": "OD-Vic",
+    "tests/test_main.py::test_set_item": "OD-Vic",
+    "tests/test_main.py::test_set_item_fail": "OD-Brit",
+    "tests/test_main.py::test_update_item": "OD-Brit",
+    "tests/test_main.py::test_write_json": "OD-Vic"
+  },
+  "pins": [],
+  "python": "3.9",
+  "repo": "hefnawi/json-storage-manager",
+  "report": {
+    "clusters": [
+      {
+        "cause": "unknown",
+        "failure_count": 56,
+        "representative_message": "json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)",
+        "signature": "json.decoder.JSONDecodeError: Expecting value: line <N> column <N> (char 0)",
+        "test_count": 6,
+        "test_ids": [
+          "tests/test_main.py::test_get_item",
+          "tests/test_main.py::test_get_no_item",
+          "tests/test_main.py::test_read_json",
+          "tests/test_main.py::test_set_item",
+          "tests/test_main.py::test_update_item",
+          "tests/test_main.py::test_write_json"
+        ]
+      },
+      {
+        "cause": "assertion",
+        "failure_count": 13,
+        "representative_message": "assert not True",
+        "signature": "assert not True",
+        "test_count": 1,
+        "test_ids": [
+          "tests/test_main.py::test_set_item_fail"
+        ]
+      },
+      {
+        "cause": "assertion",
+        "failure_count": 7,
+        "representative_message": "assert None",
+        "signature": "assert None",
+        "test_count": 1,
+        "test_ids": [
+          "tests/test_main.py::test_get_item"
+        ]
+      },
+      {
+        "cause": "unknown",
+        "failure_count": 5,
+        "representative_message": "TypeError: 'NoneType' object is not subscriptable",
+        "signature": "TypeError: 'NoneType' object is not subscriptable",
+        "test_count": 1,
+        "test_ids": [
+          "tests/test_main.py::test_update_item"
+        ]
+      }
+    ],
+    "schema_version": 1,
+    "summary": {
+      "broken": 0,
+      "commit_coverage": 1.0,
+      "fixed": 0,
+      "flaky": 7,
+      "has_commit_data": true,
+      "regressions": 0,
+      "results": 216,
+      "runs": 24,
+      "tests": 9,
+      "threshold": 0.15,
+      "window_end": "2026-08-22T14:05:14.737944+05:00",
+      "window_start": "2026-08-22T14:05:10.981737+05:00"
+    },
+    "tests": [
+      {
+        "cause": {
+          "category": "unknown",
+          "confidence": 0.0,
+          "matched": [],
+          "remediation": "No recognizable signal in the failure message. `flaky history <test-id>` shows the raw failures side by side."
+        },
+        "consecutive_passes": 0,
+        "evidence": {
+          "confidence": 1.0,
+          "divergence_rate": 1.0,
+          "divergent_commits": 1,
+          "failure_rate": 0.3333,
+          "failures": 8,
+          "flip_rate": 0.5652,
+          "flips": 13,
+          "observed_commits": 1,
+          "passes": 16,
+          "retries": 0,
+          "runs": 24,
+          "skips": 0
+        },
+        "first_seen": "2026-08-22T14:05:10.981737+05:00",
+        "last_seen": "2026-08-22T14:05:14.737944+05:00",
+        "last_status": "failed",
+        "name": "test_write_json",
+        "order_dependence": null,
+        "representative_message": "json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)",
+        "score": 0.8696,
+        "signatures": [
+          "json.decoder.JSONDecodeError: Expecting value: line <N> column <N> (char 0)"
+        ],
+        "suite": "pytest",
+        "test_id": "tests/test_main.py::test_write_json",
+        "verdict": "flaky"
+      },
+      {
+        "cause": {
+          "category": "unknown",
+          "confidence": 0.0,
+          "matched": [],
+          "remediation": "No recognizable signal in the failure message. `flaky history <test-id>` shows the raw failures side by side."
+        },
+        "consecutive_passes": 4,
+        "evidence": {
+          "confidence": 1.0,
+          "divergence_rate": 1.0,
+          "divergent_commits": 1,
+          "failure_rate": 0.3333,
+          "failures": 8,
+          "flip_rate": 0.5217,
+          "flips": 12,
+          "observed_commits": 1,
+          "passes": 16,
+          "retries": 0,
+          "runs": 24,
+          "skips": 0
+        },
+        "first_seen": "2026-08-22T14:05:10.981737+05:00",
+        "last_seen": "2026-08-22T14:05:14.737944+05:00",
+        "last_status": "passed",
+        "name": "test_get_no_item",
+        "order_dependence": null,
+        "representative_message": "json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)",
+        "score": 0.8565,
+        "signatures": [
+          "json.decoder.JSONDecodeError: Expecting value: line <N> column <N> (char 0)"
+        ],
+        "suite": "pytest",
+        "test_id": "tests/test_main.py::test_get_no_item",
+        "verdict": "flaky"
+      },
+      {
+        "cause": {
+          "category": "assertion",
+          "confidence": 0.2,
+          "matched": [
+            "assert"
+          ],
+          "remediation": "Nothing environmental in the message. Diff a passing run against a failing one to find what actually differs."
+        },
+        "consecutive_passes": 0,
+        "evidence": {
+          "confidence": 1.0,
+          "divergence_rate": 1.0,
+          "divergent_commits": 1,
+          "failure_rate": 0.6667,
+          "failures": 16,
+          "flip_rate": 0.4783,
+          "flips": 11,
+          "observed_commits": 1,
+          "passes": 8,
+          "retries": 0,
+          "runs": 24,
+          "skips": 0
+        },
+        "first_seen": "2026-08-22T14:05:10.981737+05:00",
+        "last_seen": "2026-08-22T14:05:14.737944+05:00",
+        "last_status": "failed",
+        "name": "test_get_item",
+        "order_dependence": null,
+        "representative_message": "json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)",
+        "score": 0.8435,
+        "signatures": [
+          "json.decoder.JSONDecodeError: Expecting value: line <N> column <N> (char 0)",
+          "assert None"
+        ],
+        "suite": "pytest",
+        "test_id": "tests/test_main.py::test_get_item",
+        "verdict": "flaky"
+      },
+      {
+        "cause": {
+          "category": "unknown",
+          "confidence": 0.0,
+          "matched": [],
+          "remediation": "No recognizable signal in the failure message. `flaky history <test-id>` shows the raw failures side by side."
+        },
+        "consecutive_passes": 0,
+        "evidence": {
+          "confidence": 1.0,
+          "divergence_rate": 1.0,
+          "divergent_commits": 1,
+          "failure_rate": 0.375,
+          "failures": 9,
+          "flip_rate": 0.4783,
+          "flips": 11,
+          "observed_commits": 1,
+          "passes": 15,
+          "retries": 0,
+          "runs": 24,
+          "skips": 0
+        },
+        "first_seen": "2026-08-22T14:05:10.981737+05:00",
+        "last_seen": "2026-08-22T14:05:14.737944+05:00",
+        "last_status": "failed",
+        "name": "test_read_json",
+        "order_dependence": null,
+        "representative_message": "json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)",
+        "score": 0.8435,
+        "signatures": [
+          "json.decoder.JSONDecodeError: Expecting value: line <N> column <N> (char 0)"
+        ],
+        "suite": "pytest",
+        "test_id": "tests/test_main.py::test_read_json",
+        "verdict": "flaky"
+      },
+      {
+        "cause": {
+          "category": "unknown",
+          "confidence": 0.0,
+          "matched": [],
+          "remediation": "No recognizable signal in the failure message. `flaky history <test-id>` shows the raw failures side by side."
+        },
+        "consecutive_passes": 0,
+        "evidence": {
+          "confidence": 1.0,
+          "divergence_rate": 1.0,
+          "divergent_commits": 1,
+          "failure_rate": 0.5417,
+          "failures": 13,
+          "flip_rate": 0.4783,
+          "flips": 11,
+          "observed_commits": 1,
+          "passes": 11,
+          "retries": 0,
+          "runs": 24,
+          "skips": 0
+        },
+        "first_seen": "2026-08-22T14:05:10.981737+05:00",
+        "last_seen": "2026-08-22T14:05:14.737944+05:00",
+        "last_status": "failed",
+        "name": "test_set_item",
+        "order_dependence": null,
+        "representative_message": "json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)",
+        "score": 0.8435,
+        "signatures": [
+          "json.decoder.JSONDecodeError: Expecting value: line <N> column <N> (char 0)"
+        ],
+        "suite": "pytest",
+        "test_id": "tests/test_main.py::test_set_item",
+        "verdict": "flaky"
+      },
+      {
+        "cause": {
+          "category": "assertion",
+          "confidence": 0.2,
+          "matched": [
+            "assert"
+          ],
+          "remediation": "Nothing environmental in the message. Diff a passing run against a failing one to find what actually differs."
+        },
+        "consecutive_passes": 0,
+        "evidence": {
+          "confidence": 1.0,
+          "divergence_rate": 1.0,
+          "divergent_commits": 1,
+          "failure_rate": 0.5417,
+          "failures": 13,
+          "flip_rate": 0.4783,
+          "flips": 11,
+          "observed_commits": 1,
+          "passes": 11,
+          "retries": 0,
+          "runs": 24,
+          "skips": 0
+        },
+        "first_seen": "2026-08-22T14:05:10.981737+05:00",
+        "last_seen": "2026-08-22T14:05:14.737944+05:00",
+        "last_status": "failed",
+        "name": "test_set_item_fail",
+        "order_dependence": null,
+        "representative_message": "assert not True",
+        "score": 0.8435,
+        "signatures": [
+          "assert not True"
+        ],
+        "suite": "pytest",
+        "test_id": "tests/test_main.py::test_set_item_fail",
+        "verdict": "flaky"
+      },
+      {
+        "cause": {
+          "category": "unknown",
+          "confidence": 0.0,
+          "matched": [],
+          "remediation": "No recognizable signal in the failure message. `flaky history <test-id>` shows the raw failures side by side."
+        },
+        "consecutive_passes": 1,
+        "evidence": {
+          "confidence": 1.0,
+          "divergence_rate": 1.0,
+          "divergent_commits": 1,
+          "failure_rate": 0.5833,
+          "failures": 14,
+          "flip_rate": 0.4783,
+          "flips": 11,
+          "observed_commits": 1,
+          "passes": 10,
+          "retries": 0,
+          "runs": 24,
+          "skips": 0
+        },
+        "first_seen": "2026-08-22T14:05:10.981737+05:00",
+        "last_seen": "2026-08-22T14:05:14.737944+05:00",
+        "last_status": "passed",
+        "name": "test_update_item",
+        "order_dependence": null,
+        "representative_message": "TypeError: 'NoneType' object is not subscriptable",
+        "score": 0.8435,
+        "signatures": [
+          "json.decoder.JSONDecodeError: Expecting value: line <N> column <N> (char 0)",
+          "TypeError: 'NoneType' object is not subscriptable"
+        ],
+        "suite": "pytest",
+        "test_id": "tests/test_main.py::test_update_item",
+        "verdict": "flaky"
+      },
+      {
+        "cause": null,
+        "consecutive_passes": 24,
+        "evidence": {
+          "confidence": 1.0,
+          "divergence_rate": 0.0,
+          "divergent_commits": 0,
+          "failure_rate": 0.0,
+          "failures": 0,
+          "flip_rate": 0.0,
+          "flips": 0,
+          "observed_commits": 1,
+          "passes": 24,
+          "retries": 0,
+          "runs": 24,
+          "skips": 0
+        },
+        "first_seen": "2026-08-22T14:05:10.981737+05:00",
+        "last_seen": "2026-08-22T14:05:14.737944+05:00",
+        "last_status": "passed",
+        "name": "test_is_file_not_ok",
+        "order_dependence": null,
+        "representative_message": null,
+        "score": 0.0,
+        "signatures": [],
+        "suite": "pytest",
+        "test_id": "tests/test_main.py::test_is_file_not_ok",
+        "verdict": "stable"
+      },
+      {
+        "cause": null,
+        "consecutive_passes": 24,
+        "evidence": {
+          "confidence": 1.0,
+          "divergence_rate": 0.0,
+          "divergent_commits": 0,
+          "failure_rate": 0.0,
+          "failures": 0,
+          "flip_rate": 0.0,
+          "flips": 0,
+          "observed_commits": 1,
+          "passes": 24,
+          "retries": 0,
+          "runs": 24,
+          "skips": 0
+        },
+        "first_seen": "2026-08-22T14:05:10.981737+05:00",
+        "last_seen": "2026-08-22T14:05:14.737944+05:00",
+        "last_status": "passed",
+        "name": "test_is_file_ok",
+        "order_dependence": null,
+        "representative_message": null,
+        "score": 0.0,
+        "signatures": [],
+        "suite": "pytest",
+        "test_id": "tests/test_main.py::test_is_file_ok",
+        "verdict": "stable"
+      }
+    ]
+  },
+  "sha": "c7521fc4a576cf23a8c2454106bed6fb8c951b8d",
+  "why": "Small suite sharing a JSON file between tests, the archetypal shared-state polluter."
+}
