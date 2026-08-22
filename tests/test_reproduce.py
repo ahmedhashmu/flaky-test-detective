@@ -20,6 +20,8 @@ import pytest
 from flaky_detective.models import ReproduceOutcome, Reproduction
 from flaky_detective.report import reproduction as reproduction_report
 from flaky_detective.reproduce import (
+    DEFAULT_SEARCH_TRIALS,
+    DEFAULT_TRIALS,
     ReproduceError,
     TrialBatch,
     check_command,
@@ -140,7 +142,7 @@ class TestReproduceOrderDependence:
         suspects = candidates(20, culprit_at=11, culprit="polluter")
         runner = FakeRunner(needs("polluter"))
 
-        result = reproduce(VICTIM, PYTEST, suspects, trials=20, search_trials=3, runner=runner)
+        result = reproduce(VICTIM, PYTEST, suspects, trials=20, search_trials=6, runner=runner)
 
         assert result.outcome is ReproduceOutcome.REPRODUCED
         assert result.reproduced
@@ -153,7 +155,7 @@ class TestReproduceOrderDependence:
     def test_command_puts_the_victim_last(self) -> None:
         runner = FakeRunner(needs("polluter"))
         result = reproduce(
-            VICTIM, PYTEST, ["a", "polluter", "b"], trials=6, search_trials=2, runner=runner
+            VICTIM, PYTEST, ["a", "polluter", "b"], trials=20, search_trials=6, runner=runner
         )
 
         assert result.command.endswith(VICTIM)
@@ -163,7 +165,7 @@ class TestReproduceOrderDependence:
     def test_command_disables_order_randomization(self) -> None:
         """Without this the printed command shuffles the sequence it is meant to pin."""
         runner = FakeRunner(needs("polluter"))
-        result = reproduce(VICTIM, PYTEST, ["polluter"], trials=4, search_trials=2, runner=runner)
+        result = reproduce(VICTIM, PYTEST, ["polluter"], trials=20, search_trials=6, runner=runner)
         assert "-p no:randomly" in result.command
 
     def test_finds_a_pair_no_correlation_could_name(self) -> None:
@@ -171,15 +173,15 @@ class TestReproduceOrderDependence:
         suspects[2], suspects[13] = "left", "right"
         runner = FakeRunner(needs("left", "right"))
 
-        result = reproduce(VICTIM, PYTEST, suspects, trials=10, search_trials=2, runner=runner)
+        result = reproduce(VICTIM, PYTEST, suspects, trials=20, search_trials=6, runner=runner)
 
         assert result.outcome is ReproduceOutcome.REPRODUCED
         assert set(result.sequence) == {"left", "right"}
 
     def test_measures_the_control_before_searching(self) -> None:
         runner = FakeRunner(needs("polluter"))
-        reproduce(VICTIM, PYTEST, ["polluter"], trials=7, search_trials=2, runner=runner)
-        assert runner.calls[0] == ((), 7), "the victim must be run alone first"
+        reproduce(VICTIM, PYTEST, ["polluter"], trials=20, search_trials=6, runner=runner)
+        assert runner.calls[0] == ((), 20), "the victim must be run alone first"
 
     def test_accounts_for_every_suite_run(self) -> None:
         runner = FakeRunner(needs("polluter"))
@@ -187,8 +189,8 @@ class TestReproduceOrderDependence:
             VICTIM,
             PYTEST,
             candidates(8, culprit_at=3, culprit="polluter"),
-            trials=10,
-            search_trials=2,
+            trials=20,
+            search_trials=6,
             runner=runner,
         )
         assert result.suite_runs == sum(trials for _, trials in runner.calls)
@@ -199,8 +201,8 @@ class TestReproduceOrderDependence:
             VICTIM,
             PYTEST,
             candidates(12, culprit_at=6, culprit="polluter"),
-            trials=6,
-            search_trials=2,
+            trials=20,
+            search_trials=6,
             runner=runner,
         )
         assert result.reduction == "12 candidates reduced to 1"
@@ -208,7 +210,7 @@ class TestReproduceOrderDependence:
     def test_confirms_at_full_trials_not_search_trials(self) -> None:
         runner = FakeRunner(needs("polluter"))
         result = reproduce(
-            VICTIM, PYTEST, ["a", "polluter"], trials=25, search_trials=2, runner=runner
+            VICTIM, PYTEST, ["a", "polluter"], trials=25, search_trials=6, runner=runner
         )
         assert result.trials == 25
         assert runner.calls[-1][1] == 25
@@ -220,7 +222,7 @@ class TestReproduceNonAnswers:
         runner = FakeRunner(lambda seq, trials: round(0.5 * trials))
 
         result = reproduce(
-            VICTIM, PYTEST, candidates(12), trials=20, search_trials=4, runner=runner
+            VICTIM, PYTEST, candidates(12), trials=20, search_trials=6, runner=runner
         )
 
         assert result.outcome is ReproduceOutcome.FAILS_ALONE
@@ -231,7 +233,7 @@ class TestReproduceNonAnswers:
     def test_a_stable_test_reports_nothing_found(self) -> None:
         runner = FakeRunner(lambda seq, trials: 0)
         result = reproduce(
-            VICTIM, PYTEST, candidates(10), trials=12, search_trials=3, runner=runner
+            VICTIM, PYTEST, candidates(10), trials=20, search_trials=6, runner=runner
         )
 
         assert result.outcome is ReproduceOutcome.NOT_REPRODUCED
@@ -241,7 +243,7 @@ class TestReproduceNonAnswers:
     def test_stops_after_the_control_and_one_check(self) -> None:
         """A negative answer must be cheap, or nobody will ask the question."""
         runner = FakeRunner(lambda seq, trials: 0)
-        reproduce(VICTIM, PYTEST, candidates(40), trials=10, search_trials=3, runner=runner)
+        reproduce(VICTIM, PYTEST, candidates(40), trials=20, search_trials=6, runner=runner)
         assert len(runner.calls) == 2
 
     def test_no_recorded_predecessors(self) -> None:
@@ -262,8 +264,8 @@ class TestReproduceNonAnswers:
             VICTIM,
             PYTEST,
             [VICTIM, "polluter", VICTIM],
-            trials=6,
-            search_trials=2,
+            trials=20,
+            search_trials=6,
             runner=runner,
         )
         assert VICTIM not in result.sequence
@@ -272,24 +274,31 @@ class TestReproduceNonAnswers:
     def test_deduplicates_candidates(self) -> None:
         runner = FakeRunner(needs("polluter"))
         result = reproduce(
-            VICTIM, PYTEST, ["a", "a", "polluter", "a"], trials=6, search_trials=2, runner=runner
+            VICTIM, PYTEST, ["a", "a", "polluter", "a"], trials=20, search_trials=6, runner=runner
         )
         assert result.candidates_started == 2
 
     def test_a_lucky_reduction_is_not_published(self) -> None:
-        """Accepted at 2 search trials, gone at 20. Reporting it would waste an afternoon."""
+        """Accepted during the search, gone under confirmation.
+
+        The published rate always comes from the confirmation run, so a sequence that
+        looked good on the cheap batch and does not hold up is reported as not
+        reproduced. Printing it would send someone after a command that does not work.
+        """
 
         def rule(sequence: tuple[str, ...], trials: int) -> int:
             if "polluter" not in sequence:
                 return 0
-            return 1 if trials <= 2 else 0
+            # Fails throughout the 6-trial search batches, never at the 20-trial
+            # confirmation.
+            return trials if trials <= 6 else 0
 
         result = reproduce(
             VICTIM,
             PYTEST,
             ["a", "polluter"],
             trials=20,
-            search_trials=2,
+            search_trials=6,
             runner=FakeRunner(rule),
         )
 
@@ -303,8 +312,8 @@ class TestReproduceNonAnswers:
             VICTIM,
             PYTEST,
             candidates(64, culprit_at=63, culprit="polluter"),
-            trials=6,
-            search_trials=1,
+            trials=20,
+            search_trials=6,
             budget=2,
             runner=runner,
         )
@@ -327,7 +336,7 @@ class TestControlRateGate:
             PYTEST,
             ["a", "polluter", "b"],
             trials=20,
-            search_trials=3,
+            search_trials=6,
             runner=FakeRunner(rule),
         )
 
@@ -344,12 +353,21 @@ class TestControlRateGate:
             return round(0.67 * trials)
 
         result = reproduce(
-            VICTIM, PYTEST, ["a", "b"], trials=20, search_trials=3, runner=FakeRunner(rule)
+            VICTIM, PYTEST, ["a", "b"], trials=20, search_trials=6, runner=FakeRunner(rule)
         )
 
         assert result.outcome is ReproduceOutcome.FAILS_ALONE
 
-    def test_any_failure_counts_when_the_control_is_clean(self) -> None:
+    def test_a_single_failure_against_a_clean_control_is_not_enough(self) -> None:
+        """A clean control is not proof of a zero rate.
+
+        This test asserted the opposite until the gate was fixed. It accepted any single
+        failure whenever the control was clean, because it compared against the observed
+        0.0 rather than the bound. Zero failures in 20 runs still admits a true rate near
+        14%, so one failure in 20 is what that rate already predicts and says nothing
+        about the ordering.
+        """
+
         def rule(sequence: tuple[str, ...], trials: int) -> int:
             return 1 if "polluter" in sequence else 0
 
@@ -358,12 +376,27 @@ class TestControlRateGate:
             PYTEST,
             ["a", "polluter"],
             trials=20,
-            search_trials=3,
+            search_trials=6,
             runner=FakeRunner(rule),
         )
 
+        assert result.outcome is not ReproduceOutcome.REPRODUCED
+        assert not result.command
+
+    def test_a_consistent_failure_against_a_clean_control_is_enough(self) -> None:
+        """The other side of the same gate, so it is not merely refusing everything."""
+        result = reproduce(
+            VICTIM,
+            PYTEST,
+            ["a", "polluter"],
+            trials=20,
+            search_trials=6,
+            runner=FakeRunner(needs("polluter")),
+        )
+
         assert result.outcome is ReproduceOutcome.REPRODUCED
-        assert result.failures == 1
+        assert result.sequence == ("polluter",)
+        assert result.failures == 20
 
 
 class TestCommandPreparation:
@@ -381,8 +414,8 @@ class TestCommandPreparation:
             VICTIM,
             ["pytest", "tests/", "tests/test_a.py"],
             ["polluter"],
-            trials=4,
-            search_trials=2,
+            trials=20,
+            search_trials=6,
             runner=runner,
         )
 
@@ -396,8 +429,8 @@ class TestCommandPreparation:
             VICTIM,
             ["pytest", "-x", "--tb=short", "tests/"],
             ["polluter"],
-            trials=4,
-            search_trials=2,
+            trials=20,
+            search_trials=6,
             runner=runner,
         )
 
@@ -410,8 +443,8 @@ class TestCommandPreparation:
             VICTIM,
             ["python", "-m", "pytest"],
             ["polluter"],
-            trials=4,
-            search_trials=2,
+            trials=20,
+            search_trials=6,
             runner=runner,
         )
         assert result.command.startswith("python -m pytest")
@@ -437,16 +470,21 @@ class TestCommandPreparation:
 
 class TestCostEstimate:
     def test_grows_with_candidates(self) -> None:
-        small = estimate_cost(4, trials=20, search_trials=3)
-        large = estimate_cost(64, trials=20, search_trials=3)
+        small = estimate_cost(4, trials=20, search_trials=6)
+        large = estimate_cost(64, trials=20, search_trials=6)
         assert large > small
 
     def test_includes_the_control_and_the_confirmation(self) -> None:
-        assert estimate_cost(0, trials=20, search_trials=3) == 20
+        assert estimate_cost(0, trials=20, search_trials=6) == 20
 
     def test_is_in_the_right_ballpark(self) -> None:
-        """The real 15-candidate search on examples/flaky_demo used 45 suite runs."""
-        assert 30 <= estimate_cost(15, trials=12, search_trials=3) <= 80
+        """Bounded against a real measured run, not a guessed range.
+
+        An estimate exists so a user can decide against running the search, which means
+        it has to be close enough to decide on.
+        """
+        estimate = estimate_cost(15, trials=DEFAULT_TRIALS, search_trials=DEFAULT_SEARCH_TRIALS)
+        assert 60 <= estimate <= 130
 
 
 class TestReproductionModel:

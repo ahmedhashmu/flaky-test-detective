@@ -30,12 +30,48 @@ cannot make it fail on purpose. Reproduction is where the actual cost lives.
 ## Decision
 
 Add `flaky reproduce`, which runs the suite against candidate subsets and reduces them by
-**delta debugging** until what remains is the smallest set of tests that still makes the
+**delta debugging** until what remains is a locally minimal set of tests that still makes the
 victim fail. Output is not a correlation. It is a shell command and a measured failure rate.
 
 ```
 flaky reproduce test_expects_clean_registry -- pytest
 ```
+
+### Amendment: judge against the control's bound, not its observed rate
+
+The first version of this compared each batch against the control's *observed* failure
+rate. That is the same mistake
+[ADR-0012](0012-attribute-flakiness-to-a-branch.md) was written to fix in the branch
+comparison, arriving by a different route, and it took a review to notice.
+
+A clean control does not prove a zero rate. **Zero failures in 20 runs still admits a true
+rate near 14%**, so comparing against 0.0 meant any single failure was accepted as a
+reproduction — and a one-in-twenty flake could be pinned on whatever subset the search
+happened to be holding. Worse than a plain false positive, because the printed command
+would sometimes appear to work when the reader ran it.
+
+It now compares against the Clopper-Pearson upper bound, via the same
+`statistics.upper_bound` the branch comparison uses.
+
+That has a consequence worth stating rather than discovering: because the bar is a rate
+rather than "any failure at all", the number of search trials sets a floor on how often a
+sequence must fail to be findable. Measured, against a clean control of 0/20:
+
+| Search trials | Failures needed | Which is a rate of |
+|---|---:|---:|
+| 3 | 3 | **100%** |
+| 4 | 3 | 75% |
+| 5 | 3 | 60% |
+| **6** | **3** | **50%** |
+| 8 | 4 | 50% |
+
+At the original default of three, the search could only ever clear on a sequence that
+failed *every single time* — so the tool would have found deterministic order dependence
+and nothing else, while appearing to search for the general case. `DEFAULT_SEARCH_TRIALS`
+is now 6, the cheapest point where a merely-frequent dependence is findable.
+
+The cost of both changes together, on the same demo case: **45 suite runs to 88**. The
+answer is unchanged (15 candidates to 1, the true polluter) and now it is defensible.
 
 ### Measure the control first, always
 
@@ -137,7 +173,7 @@ $ pytest -p no:randomly \
 1 passed                    # three times out of three
 ```
 
-12/12 in that order, 0/12 alone. Seven experiments to get there from fifteen candidates.
+20/20 in that order, 0/20 alone. Eight experiments to get there from fifteen candidates.
 
 Two properties of that table matter as much as the successes. The negative answers were
 **cheap** — 11 and 15 suite runs against 45 for a positive — because the search checks all

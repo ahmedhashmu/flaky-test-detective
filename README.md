@@ -124,10 +124,10 @@ runs, so whatever varied, it was not the code. That is evidence, not inference.
 
 **It makes the test fail on demand.** Detection is the easy half. A flaky test nobody can
 reproduce is still unfixable, so `flaky reproduce` runs your suite against candidate subsets
-and delta-debugs them down to the smallest sequence that still breaks the test — then prints
-the command. On the demo suite: **15 candidate predecessors reduced to 1 in 7 experiments,
-12/12 failures in that order against 0/12 alone.** Not a correlation. A command you can
-paste.
+and delta-debugs them down to a *locally minimal* sequence that still breaks the test — then prints
+the command. On the demo suite: **15 candidate predecessors reduced to 1 in 8 experiments,
+20/20 failures in that order against 0/20 alone**, for 88 suite runs. Not a correlation. A
+command you can paste.
 
 **It refuses to cry wolf.** A consistently failing test is reported as `broken` or
 `regression`, never flaky, because labelling a real break "flaky" teaches you to re-run
@@ -153,8 +153,16 @@ failed 35% of the time needs 8 clean runs to prove it; one that failed 2% of the
 **149**, and that is the one people declare fixed after three. The tool states the number
 instead of leaving you to guess it.
 
-**It works for any language.** The tool reads JUnit XML and never reads your source, so
-pytest, jest, go, JUnit, Gradle and .NET all work without it knowing anything about them.
+**It is language-agnostic by construction.** The tool reads JUnit XML and never reads your
+source, so nothing in the analysis knows what language produced a result. In practice that
+means **pytest, jest and go are validated against captured real output**, and Surefire,
+Gradle and .NET are supported structurally but not yet confirmed against a live runner —
+see [Limitations](#limitations). The design claim is strong; the verification is only as
+strong as the toolchains that were available.
+
+One genuine exception, stated where it belongs rather than buried: `flaky reproduce` is
+pytest-only, because reproducing a flake requires driving the runner with an ordered test
+list rather than just reading its output.
 
 ## Measured accuracy
 
@@ -781,7 +789,7 @@ uv sync
 Substitute `pip install -e ".[dev]"` for `uv sync` and drop the `uv run` prefixes to use
 pip instead.
 
-**1. Test suite** — 1,074 tests, about 30 seconds:
+**1. Test suite** — 1,075 tests, about 30 seconds:
 
 ```sh
 uv run pytest
@@ -854,7 +862,7 @@ Expect ~10 flaky tests, then check the three things that matter:
 separates a detector from an investigation tool, and it takes about a minute:
 
 ```sh
-uv run flaky reproduce test_expects_clean_registry --db /tmp/demo.db -n 12 -- \
+uv run flaky reproduce test_expects_clean_registry --db /tmp/demo.db -- \
   uv run pytest
 ```
 
@@ -863,7 +871,7 @@ It measures the test alone first, then delta-debugs the recorded predecessors. E
 - **Reproduced on demand**, with `15 candidates reduced to 1`.
 - The named test in the printed sequence is `test_registers_session` — the actual polluter,
   which you can confirm by reading `examples/flaky_demo/test_shared_state.py`.
-- `12/12 failed` in that order against `0/12` alone.
+- `20/20 failed` in that order against `0/20` alone.
 
 Then verify the tool's output independently, without the tool:
 
@@ -879,7 +887,7 @@ uv run pytest -p no:randomly \
 Now try one where there is nothing to isolate, which is the more important half:
 
 ```sh
-uv run flaky reproduce test_worker_finishes_within_deadline --db /tmp/demo.db -n 12 -- \
+uv run flaky reproduce test_worker_finishes_within_deadline --db /tmp/demo.db -- \
   uv run pytest
 ```
 

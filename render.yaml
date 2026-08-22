@@ -1,0 +1,54 @@
+# Render Blueprint for the public demo dashboard.
+#
+# What this deploys is a *demo*, and the distinction matters. `flaky serve` defaults to
+# 127.0.0.1 because a real history contains test names, failure messages and commit SHAs,
+# and the server has no authentication. Binding it to 0.0.0.0 is therefore only safe for a
+# database that contains nobody's data -- so the start command generates one on every boot
+# and never reads a real db.
+#
+# Render's filesystem being ephemeral is a feature here rather than a limitation: there is
+# no disk to attach, nothing to migrate, and no state to leak between deploys. Each restart
+# regenerates the history and re-runs the real analysis over it.
+#
+# The history is generated; the analysis is not. Verdicts come from the same `analyze()` the
+# CLI uses, which is the property that makes the demo worth showing at all.
+
+services:
+  - type: web
+    name: flaky-test-detective
+    runtime: python
+    plan: free
+
+    # Installs the package and its console script. The compiled dashboard bundle ships
+    # inside the wheel, so there is no Node build step and no separate static host.
+    buildCommand: pip install .
+
+    # `--host 0.0.0.0` is required by Render's port binding, and is acceptable only
+    # because of the generated database on the line above it.
+    startCommand: >-
+      rm -f /tmp/flaky-demo.db /tmp/flaky-demo.db-wal /tmp/flaky-demo.db-shm &&
+      flaky demo --db /tmp/flaky-demo.db --no-serve &&
+      flaky serve
+      --db /tmp/flaky-demo.db
+      --host 0.0.0.0
+      --port $PORT
+      --no-open
+      --quiet
+
+    # Already implemented. Verified to return {"api_version": 1, "status": "ok"} with a
+    # 200 under exactly the start command above.
+    #
+    # Worth being precise about what that does and does not prove: it confirms the server
+    # is up and the API contract version matches, not that the database has content. The
+    # start command chains with `&&`, so a failed `flaky demo` prevents `flaky serve` from
+    # starting at all -- which is what actually stops an empty dashboard being served, and
+    # it is a stronger guarantee than a richer health payload would give.
+    healthCheckPath: /api/health
+
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12"
+      # Reports are written UTF-8 with LF regardless of the host locale (ADR-0017), but
+      # setting this makes the container's own logs match.
+      - key: PYTHONIOENCODING
+        value: utf-8

@@ -1,0 +1,97 @@
+name: Release
+
+# Publishes to PyPI on a version tag, using Trusted Publishing so there is no API token
+# in this repository's secrets. That is not a convenience: a long-lived PyPI token stored
+# in CI is the credential most worth stealing from a project like this one, since it would
+# let an attacker ship a release that runs on other people's build machines.
+#
+# One-time setup on PyPI, which cannot be done from here:
+#   PyPI -> your project -> Publishing -> Add a new pending publisher
+#     owner:            ahmedhashmu
+#     repository:       flaky-test-detective
+#     workflow:         release.yml
+#     environment:      pypi
+#
+# Then push a tag:  git tag v0.1.0 && git push origin v0.1.0
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and check the distributions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Build wheel and sdist
+        run: uv build
+
+      # The version in the tag and the version in the package must agree, or the release
+      # on GitHub and the release on PyPI describe different code.
+      - name: The tag must match the packaged version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tag="${GITHUB_REF#refs/tags/v}"
+          packaged=$(uv run python -c "import tomllib,pathlib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
+          echo "tag=$tag packaged=$packaged"
+          if [ "$tag" != "$packaged" ]; then
+            echo "Tag v$tag does not match pyproject version $packaged."
+            exit 1
+          fi
+
+      # The dashboard bundle ships inside the wheel, and `flaky serve` is useless without
+      # it. A wheel missing the compiled assets would install cleanly and then fail at the
+      # one command a new user runs first, so it is checked before anything is published.
+      - name: The wheel must contain the compiled dashboard
+        run: |
+          wheel=$(ls dist/*.whl)
+          python -m zipfile -l "$wheel" > listing.txt
+          grep -q "flaky_detective/web/static/index.html" listing.txt
+          grep -qE "flaky_detective/web/static/assets/index-.*\.js" listing.txt
+          echo "Dashboard assets present in $wheel"
+
+      # Install the built artifact somewhere the source tree cannot be imported by
+      # accident, and run the path a new user takes first.
+      - name: A fresh install of the wheel works
+        run: |
+          python -m venv /tmp/fresh
+          /tmp/fresh/bin/pip install --quiet "$(ls dist/*.whl)"
+          cd /tmp
+          /tmp/fresh/bin/flaky --version
+          /tmp/fresh/bin/flaky demo --db /tmp/release-check.db --no-serve
+          /tmp/fresh/bin/flaky analyze --db /tmp/release-check.db --limit 5
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: distributions
+          path: dist/
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    environment:
+      name: pypi
+      url: https://pypi.org/p/flaky-test-detective
+    permissions:
+      id-token: write  # Trusted Publishing exchanges this for a short-lived credential.
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: distributions
+          path: dist/
+
+      - name: Publish
+        uses: pypa/gh-action-pypi-publish@release/v1

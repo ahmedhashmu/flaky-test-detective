@@ -41,7 +41,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from .analysis.statistics import tail_at_least
+from .analysis.statistics import tail_at_least, upper_bound
 from .ingest import junit
 from .ingest.junit import ParseError
 from .models import ReproduceOutcome, Reproduction, Status
@@ -53,14 +53,34 @@ The number that appears in the output, so it should be large enough that the rat
 something. Twenty gives a 5% resolution.
 """
 
-DEFAULT_SEARCH_TRIALS = 3
+DEFAULT_SEARCH_TRIALS = 6
 """Trials used for each oracle call *during* the search.
 
 Delta debugging makes O(n log n) oracle calls. At twenty trials each, minimizing forty
-candidates would run the suite thousands of times and nobody would wait for it. Three is
-enough to detect the common case, where order dependence is deterministic given the
-order, and the final answer is re-measured at full `trials` afterwards so a lucky
-reduction cannot become a published rate.
+candidates would run the suite thousands of times and nobody would wait for it. So the
+search runs cheap batches and the final sequence is re-measured at full `trials`, which
+is what stops a lucky reduction becoming a published rate.
+
+Six rather than three, and the reason is measured rather than preferred. Because a batch
+has to beat the *upper bound* on the control rate (see `_beats_control`), the number of
+trials sets a floor on how often a sequence must fail to be detectable at all. Against a
+clean control of 0/20, whose bound is 13.9%:
+
+| Search trials | Failures needed | Which is a rate of |
+|---|---:|---:|
+| 3 | 3 | **100%** |
+| 4 | 3 | 75% |
+| 5 | 3 | 60% |
+| **6** | **3** | **50%** |
+| 8 | 4 | 50% |
+
+At three, the search can only ever clear on a sequence that fails *every single time* --
+so the tool would find deterministic order dependence and nothing else, while appearing
+to search for the general case. Six reaches 50% for the same three failures, which is
+the cheapest point on that table where a merely-frequent dependence is findable.
+
+The threshold moves with the control size, which is correct: fewer control runs means a
+wider bound and a higher bar. At `-n 12` the same six trials need 4 failures, not 3.
 """
 
 DEFAULT_CANDIDATES = 40
@@ -244,20 +264,21 @@ def reproduce(
             "renamed or removed since the history was recorded."
         )
 
-    control_rate = control.failures / control.trials if control.trials else 0.0
+    # The bound, not the observed rate. A clean control does not prove a zero rate, and
+    # treating it as one is how an innocent test gets named. See `_beats_control`.
+    control_bound = upper_bound(control.failures, control.trials, alpha)
 
     def accepts(sequence: Sequence[str]) -> bool:
         nonlocal spent
         batch = execute(sequence, search_trials)
         spent += batch.trials
         announce(f"  {len(sequence)} test(s) before it: {batch.failures}/{batch.trials} failed")
-        return _beats_control(batch, control_rate, alpha)
+        return _beats_control(batch, control_bound, alpha)
 
     if not ordered:
         return _no_sequence(
             test_id,
             control,
-            control_rate,
             spent=spent,
             notes=notes,
             reason="No tests were recorded as running before it, so there is no "
@@ -269,7 +290,6 @@ def reproduce(
         return _no_sequence(
             test_id,
             control,
-            control_rate,
             spent=spent,
             notes=notes,
             candidates_started=len(ordered),
@@ -289,7 +309,7 @@ def reproduce(
     confirm = execute(delta.subset, trials)
     spent += confirm.trials
 
-    if not _beats_control(confirm, control_rate, alpha):
+    if not _beats_control(confirm, control_bound, alpha):
         return Reproduction(
             test_id=test_id,
             outcome=ReproduceOutcome.NOT_REPRODUCED,
@@ -339,25 +359,38 @@ def reproduce(
     )
 
 
-def _beats_control(batch: TrialBatch, control_rate: float, alpha: float) -> bool:
-    """Whether this batch failed more than the victim's solo rate explains.
+def _beats_control(batch: TrialBatch, control_bound: float, alpha: float) -> bool:
+    """Whether this batch failed more than the victim's own solo rate explains.
 
-    With a control rate of zero any failure counts, and correctly: a test that never
-    fails alone and just failed after a prefix has been reproduced. Otherwise the
-    observation has to clear an exact binomial tail, which is what stops a
-    fails-alone-sometimes test from being blamed on an arbitrary subset.
+    `control_bound` is the **upper** end of the confidence interval on the control rate,
+    not the observed rate. That distinction is the whole point, and getting it wrong is
+    the mistake [ADR-0012] already caught once in the branch comparison:
+
+        A clean control is not proof of a zero rate. Zero failures in 20 runs still
+        admits a true rate near 14%.
+
+    Judging against the observed 0.0 meant any single failure was accepted as a
+    reproduction, so a one-in-twenty flake could be attributed to whatever subset the
+    search happened to be holding -- and the printed command would even appear to work
+    when the reader ran it, because the test really does fail sometimes. Against the
+    bound, one failure in twenty no longer clears the bar and the honest answer comes
+    back instead.
+
+    Consequence worth stating: at a small `search_trials` this requires the sequence to
+    fail nearly every time during the search. That is why the default is 5 rather than 3
+    -- see `DEFAULT_SEARCH_TRIALS`.
     """
     if batch.trials <= 0 or batch.failures <= 0:
         return False
-    if control_rate <= 0.0:
+    if control_bound <= 0.0:
+        # Only reachable when the control was never run, which callers do not do.
         return True
-    return tail_at_least(batch.failures, batch.trials, control_rate) <= alpha
+    return tail_at_least(batch.failures, batch.trials, control_bound) <= alpha
 
 
 def _no_sequence(
     test_id: str,
     control: TrialBatch,
-    control_rate: float,
     *,
     spent: int,
     notes: Sequence[str],

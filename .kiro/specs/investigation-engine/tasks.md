@@ -68,7 +68,7 @@ reproducer the right piece to build rather than a guess about what would be impr
     budgets with the published rate from a fresh confirmation
   - 55 tests against a fake oracle, running in 0.1s
   - **Measured** on `examples/flaky_demo`: 15 candidates reduced to 1 — the true polluter —
-    in 7 experiments, 12/12 failures in that order against 0/12 alone, 45 suite runs. The
+    in 8 experiments, 20/20 failures in that order against 0/20 alone, 88 suite runs. The
     printed command was then run independently, outside the tool, and failed 3 times of 3
   - **Negative answers are cheap and honest:** the timing flake reports `fails_alone` with
     nothing blamed, in a third of the cost
