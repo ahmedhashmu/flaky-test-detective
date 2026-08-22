@@ -1,0 +1,81 @@
+name: Pages
+
+# Publishes a small sample-output site so a reviewer can see working output without
+# installing anything.
+#
+# What is NOT published, deliberately: the interactive dashboard. It reads a local SQLite
+# file and serves from the user's own machine, which is the property that makes it safe to
+# point at a private test suite. Hosting it would mean either shipping someone's test
+# history to a server or standing up a service this project claims not to need.
+#
+# What IS published is a self-contained analysis report built from `flaky demo` -- generated
+# data, labelled as generated on the landing page, so a reviewer cannot mistake it for a
+# measurement. The real measurements stay in docs/ where they are reproducible by command.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build the sample site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install
+        run: uv sync --python 3.12
+
+      - name: Render the sample report
+        run: |
+          mkdir -p site
+          cp docs/pages/index.html site/index.html
+
+          uv run flaky demo --db demo.db --no-serve
+          uv run flaky report --db demo.db --format html --output site/report.html
+
+          # The no-CDN claim on the landing page is checked rather than trusted. A report
+          # that reached out to a font service would still render, and would quietly make
+          # the claim false.
+          if grep -qiE 'https?://(cdn|unpkg|fonts\.|ajax\.)' site/report.html; then
+            echo "The report references an external origin. The page claims it does not."
+            exit 1
+          fi
+
+          # The landing page must keep saying the data is generated. Losing that line is
+          # how a sample becomes a misleading claim.
+          grep -q "generated demo data" site/index.html
+
+          ls -la site
+
+      - name: Upload
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

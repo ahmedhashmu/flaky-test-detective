@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flaky Test Detective — live sample output</title>
+<!--
+  Deliberately dependency-free: no CDN, no font service, no analytics. The same rule
+  the shipped HTML report follows, and it is checked in CI. A page about trustworthy
+  evidence should not be phoning anywhere to render itself.
+-->
+<style>
+  :root { color-scheme: dark; }
+  body {
+    font: 16px/1.65 ui-sans-serif, system-ui, -apple-system, sans-serif;
+    background: #0f1115; color: #e5e7eb; margin: 0; padding: 2.5rem 1.25rem 4rem;
+  }
+  main { max-width: 46rem; margin: 0 auto; }
+  h1 { font-size: 1.6rem; margin: 0 0 .35rem; }
+  h2 { font-size: 1.1rem; margin: 2.25rem 0 .6rem; }
+  p, li { color: #cbd5e1; }
+  .lede { font-size: 1.05rem; color: #e5e7eb; }
+  a { color: #7dd3fc; }
+  code {
+    background: #1c2029; padding: .12rem .35rem; border-radius: 4px;
+    font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  pre {
+    background: #1c2029; padding: .85rem 1rem; border-radius: 6px; overflow-x: auto;
+    font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; color: #e5e7eb;
+  }
+  .warn {
+    border: 1px solid #b45309; background: #2a1e0c; color: #fde68a;
+    padding: .85rem 1rem; border-radius: 6px; margin: 1.5rem 0;
+  }
+  .warn strong { color: #fbbf24; }
+  .real {
+    border: 1px solid #15803d; background: #0d1f14; color: #bbf7d0;
+    padding: .85rem 1rem; border-radius: 6px; margin: 1.5rem 0;
+  }
+  .real strong { color: #4ade80; }
+  ul { padding-left: 1.15rem; }
+  footer { margin-top: 3rem; color: #94a3b8; font-size: .9rem; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Flaky Test Detective</h1>
+<p class="lede">
+  Finds flaky tests from the JUnit XML your runner already produces, proves which ones are
+  flaky rather than broken, and then makes the flake <em>fail on demand</em> so it can
+  actually be fixed.
+</p>
+
+<div class="warn">
+  <strong>Read this before the numbers.</strong> The report linked below is built from
+  <strong>generated demo data</strong>, not from a real test suite. It exists so this page can
+  show working output without asking you to install anything. Its verdicts are genuine output
+  from the same analysis the CLI runs — but the <em>history</em> underneath them was
+  synthesised, so treat it as a UI sample and nothing more.
+</div>
+
+<h2>Sample output</h2>
+<ul>
+  <li><a href="report.html">Analysis report</a> — ranked flakes with the evidence behind each
+    verdict. Self-contained page, no CDN.</li>
+</ul>
+
+<div class="real">
+  <strong>The measured claims are elsewhere, and they are real.</strong> Accuracy is not
+  self-asserted; it is scored against ground truth and against labels this project did not
+  write. Both are reproducible with one command each.
+  <ul>
+    <li><a href="https://github.com/ahmedhashmu/flaky-test-detective/blob/main/docs/accuracy.md">docs/accuracy.md</a>
+      — accuracy against generated ground truth, including the weak numbers. Reproduce with
+      <code>flaky benchmark</code>.</li>
+    <li><a href="https://github.com/ahmedhashmu/flaky-test-detective/blob/main/docs/real-world.md">docs/real-world.md</a>
+      — scored against developer-confirmed labels from 12 real repositories. Reproduce with
+      <code>flaky validate validation/results</code>.</li>
+  </ul>
+</div>
+
+<h2>Run the real thing in two commands</h2>
+<p>
+  The interactive dashboard is not hosted here on purpose. It reads a local SQLite file and
+  serves from your machine — there is no account, no upload, and nothing leaves the laptop.
+  Hosting it would mean contradicting the one property that makes it safe to point at a
+  private test suite.
+</p>
+<pre>pip install "git+https://github.com/ahmedhashmu/flaky-test-detective"
+flaky demo</pre>
+<p>
+  That builds a populated database and opens the dashboard. To point it at a real suite
+  instead: <code>flaky hunt -n 20 -- pytest tests/</code> then <code>flaky analyze</code>.
+</p>
+
+<h2>The part worth three minutes</h2>
+<ul>
+  <li><strong>Evidence over inference.</strong> The primary signal is same-commit divergence:
+    one test, one commit SHA, both a pass and a fail. Measured false-alarm rate 0.0%.</li>
+  <li><strong>It makes the test fail on demand.</strong> <code>flaky reproduce</code>
+    delta-debugs your suite down to the smallest test sequence that still breaks the test,
+    then prints the command. CI runs that printed command and fails the build if it passes.</li>
+  <li><strong>It publishes what did not work.</strong> One change improved diagnosis 3.5× on
+    generated data and did nothing on real code. That negative result is on the page rather
+    than in a drawer.</li>
+</ul>
+
+<footer>
+  <a href="https://github.com/ahmedhashmu/flaky-test-detective">Source, documentation and
+  decision records on GitHub</a> · MIT licensed · This page is generated by CI from the
+  repository and contains no real project's test data.
+</footer>
+
+</main>
+</body>
+</html>
