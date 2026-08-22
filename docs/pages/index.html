@@ -61,11 +61,22 @@
   synthesised, so treat it as a UI sample and nothing more.
 </div>
 
-<h2>Sample output</h2>
+<h2>Sample output — both of these are live</h2>
 <ul>
-  <li><a href="report.html">Analysis report</a> — ranked flakes with the evidence behind each
-    verdict. Self-contained page, no CDN.</li>
+  <li><a href="dashboard/"><strong>The dashboard</strong></a> — the real thing, interactive.
+    Open a test to see its evidence split into <em>proven</em> and <em>inferred</em>, which is
+    the distinction the whole tool is built around. This is the same compiled bundle the
+    package ships, reading pre-generated JSON instead of a live server, so there is nothing
+    running behind it.</li>
+  <li><a href="report.html">Analysis report</a> — the standalone HTML export, as
+    <code>flaky report --format html</code> produces it. Single file, no CDN.</li>
 </ul>
+<p>
+  Start with the trust score, then click <code>test_large_upload_completes</code>. Note that
+  the order-dependent tests name the test that pollutes them, and that a consistently failing
+  test is labelled <code>broken</code> rather than flaky — refusing to call a real break
+  flaky is the property the tool is most careful about.
+</p>
 
 <div class="real">
   <strong>The measured claims are elsewhere, and they are real.</strong> Accuracy is not
@@ -81,12 +92,13 @@
   </ul>
 </div>
 
-<h2>Run the real thing in two commands</h2>
+<h2>Point it at your own suite in two commands</h2>
 <p>
-  The interactive dashboard is not hosted here on purpose. It reads a local SQLite file and
-  serves from your machine — there is no account, no upload, and nothing leaves the laptop.
-  Hosting it would mean contradicting the one property that makes it safe to point at a
-  private test suite.
+  What is hosted here is a <em>demo</em>: generated history, baked to static files. The tool
+  itself is local-first and stays that way — it reads a SQLite file on your machine, needs no
+  account, and uploads nothing. That is what makes it safe to run against a private test
+  suite, and it is why the thing above is a pre-generated sample rather than a service you
+  could send your own data to.
 </p>
 <pre>pip install "git+https://github.com/ahmedhashmu/flaky-test-detective"
 flaky demo</pre>

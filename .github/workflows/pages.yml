@@ -41,27 +41,47 @@ jobs:
       - name: Install
         run: uv sync --python 3.12
 
-      - name: Render the sample report
+      - name: Build the site
         run: |
-          mkdir -p site
-          cp docs/pages/index.html site/index.html
-
           uv run flaky demo --db demo.db --no-serve
+
+          # Landing page, dashboard (bundle + injected static flag), and the API payloads
+          # the dashboard would otherwise fetch from `flaky serve`.
+          uv run python docs/pages/build.py demo.db site
+
           uv run flaky report --db demo.db --format html --output site/report.html
 
-          # The no-CDN claim on the landing page is checked rather than trusted. A report
-          # that reached out to a font service would still render, and would quietly make
-          # the claim false.
-          if grep -qiE 'https?://(cdn|unpkg|fonts\.|ajax\.)' site/report.html; then
-            echo "The report references an external origin. The page claims it does not."
+      - name: The published site must hold its own claims
+        run: |
+          # No external origin. A page that quietly reached out to a font service would
+          # still render, and would make the "no CDN" claim on it false.
+          if grep -rqiE 'https?://(cdn|unpkg|fonts\.|ajax\.)' site/index.html site/report.html; then
+            echo "A page references an external origin. The site claims it does not."
             exit 1
           fi
 
           # The landing page must keep saying the data is generated. Losing that line is
-          # how a sample becomes a misleading claim.
+          # how a labelled sample turns into a misleading one.
           grep -q "generated demo data" site/index.html
 
-          ls -la site
+          # The dashboard has to be in static mode, or it will try to reach a server that
+          # does not exist and show a connection error to every reviewer.
+          grep -q "__FTD_STATIC__=true" site/dashboard/index.html
+
+          # Every test the overview lists must have a detail payload, otherwise clicking a
+          # row 404s. build.py already fails on this; asserted here too because it is the
+          # one way this site can look broken rather than merely incomplete.
+          uv run python - <<'PY'
+          import json, pathlib
+          root = pathlib.Path("site/dashboard/api")
+          overview = json.loads((root / "overview.json").read_text())
+          details = json.loads((root / "tests.json").read_text())["tests"]
+          missing = [t["test_id"] for t in overview["tests"] if t["test_id"] not in details]
+          assert not missing, f"no detail payload for: {missing}"
+          print(f"{len(details)} test payloads, all reachable")
+          PY
+
+          find site -type f | sort
 
       - name: Upload
         uses: actions/upload-pages-artifact@v3

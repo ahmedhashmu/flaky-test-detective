@@ -18,6 +18,36 @@ export class ApiError extends Error {
   }
 }
 
+// Static mode: the same dashboard, served from a plain file host with no Python
+// process behind it. The published sample site uses it so a reviewer can click
+// through real output without installing anything.
+//
+// Gated on a flag the static index.html sets before the bundle loads, so `flaky serve`
+// takes the live path unchanged. A build-time switch would have meant two bundles, and
+// the bundle committed to the package is checked against a rebuild in CI -- one of them
+// would inevitably go stale.
+declare global {
+  interface Window {
+    __FTD_STATIC__?: boolean;
+  }
+}
+
+const isStatic = (): boolean =>
+  typeof window !== "undefined" && window.__FTD_STATIC__ === true;
+
+let staticDetails: Promise<Record<string, TestDetail>> | null = null;
+
+/** Every test's detail payload in one file, because a static host cannot route. */
+function loadStaticDetails(): Promise<Record<string, TestDetail>> {
+  staticDetails ??= request<StaticDetails>("./api/tests.json").then((payload) => payload.tests);
+  return staticDetails;
+}
+
+interface StaticDetails {
+  api_version?: number;
+  tests: Record<string, TestDetail>;
+}
+
 async function request<T extends { api_version?: number }>(path: string): Promise<T> {
   let response: Response;
   try {
@@ -62,7 +92,18 @@ async function request<T extends { api_version?: number }>(path: string): Promis
   return payload;
 }
 
-export const fetchOverview = () => request<Overview>("/api/overview");
+export const fetchOverview = () =>
+  isStatic() ? request<Overview>("./api/overview.json") : request<Overview>("/api/overview");
 
-export const fetchTestDetail = (testId: string) =>
-  request<TestDetail>(`/api/tests/${encodeURIComponent(testId)}`);
+export const fetchTestDetail = async (testId: string): Promise<TestDetail> => {
+  if (!isStatic()) {
+    return request<TestDetail>(`/api/tests/${encodeURIComponent(testId)}`);
+  }
+
+  const detail = (await loadStaticDetails())[testId];
+  if (!detail) {
+    // Matches the live server's 404 shape, so the same error UI covers both.
+    throw new ApiError(`No test matching ${testId}`, 404);
+  }
+  return detail;
+};
